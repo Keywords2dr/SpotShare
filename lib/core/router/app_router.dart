@@ -5,12 +5,12 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/auth/presentation/login_screen.dart';
-import '../../features/auth/presentation/profile_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
+import '../../features/explore/presentation/explore_feed_screen.dart';
+import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/spots/domain/spot_model.dart';
-import '../../features/spots/presentation/create_spot_screen.dart';
-import '../../features/spots/presentation/explore_feed_screen.dart';
-import '../../features/spots/presentation/spot_detail_screen.dart';
+import '../../features/spots/presentation/create/create_spot_screen.dart';
+import '../../features/spots/presentation/detail/spot_detail_screen.dart';
 import '../presentation/main_shell_screen.dart';
 
 class _RouterRefreshNotifier extends ChangeNotifier {
@@ -53,7 +53,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/spots/:id',
         builder: (context, state) {
           final spotId = state.pathParameters['id'] ?? '';
-          final initialSpot = state.extra is SpotModel ? state.extra as SpotModel : null;
+          final initialSpot =
+              state.extra is SpotModel ? state.extra as SpotModel : null;
           return SpotDetailScreen(
             spotId: spotId,
             initialSpot: initialSpot,

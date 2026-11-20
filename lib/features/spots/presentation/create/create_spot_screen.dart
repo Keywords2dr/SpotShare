@@ -5,8 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../data/place_search_service.dart';
-import 'spot_providers.dart';
+import '../../../../core/services/place_search_service.dart';
+import '../../../../core/services/service_providers.dart';
+import 'create_spot_controller.dart';
 
 class CreateSpotScreen extends ConsumerStatefulWidget {
   const CreateSpotScreen({super.key});
@@ -107,7 +108,8 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
         _suggestions = results;
         _isSearchingPlace = false;
         if (results.isEmpty) {
-          _placeError = 'Không tìm thấy địa chỉ phù hợp. Thử nhập thêm tên tỉnh/thành phố.';
+          _placeError =
+              'Không tìm thấy địa chỉ phù hợp. Thử nhập thêm tên tỉnh/thành phố.';
         }
       });
     } catch (e) {
@@ -126,7 +128,8 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
       _selectedLat = suggestion.latitude;
       _selectedLng = suggestion.longitude;
       _placeSearchController.text = suggestion.fullText;
-      if (_titleController.text.trim().isEmpty && suggestion.mainText.isNotEmpty) {
+      if (_titleController.text.trim().isEmpty &&
+          suggestion.mainText.isNotEmpty) {
         _titleController.text = suggestion.mainText;
       }
       _suggestions = [];
@@ -313,8 +316,8 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
               height: 108,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount:
-                    _selectedImages.length + (_selectedImages.length < 6 ? 1 : 0),
+                itemCount: _selectedImages.length +
+                    (_selectedImages.length < 6 ? 1 : 0),
                 separatorBuilder: (_, _) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
                   if (index == _selectedImages.length) {
@@ -502,7 +505,8 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+                  color:
+                      theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: theme.colorScheme.primary.withValues(alpha: 0.4),
