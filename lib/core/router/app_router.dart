@@ -11,6 +11,7 @@ import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/spots/domain/spot_model.dart';
 import '../../features/spots/presentation/create/create_spot_screen.dart';
 import '../../features/spots/presentation/detail/spot_detail_screen.dart';
+import '../../features/spots/presentation/edit/edit_spot_screen.dart';
 import '../presentation/main_shell_screen.dart';
 
 class _RouterRefreshNotifier extends ChangeNotifier {
@@ -48,6 +49,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/spots/:id/edit',
+        builder: (context, state) {
+          final spotId = state.pathParameters['id'] ?? '';
+          final initialSpot =
+              state.extra is SpotModel ? state.extra as SpotModel : null;
+          return EditSpotScreen(
+            spotId: spotId,
+            initialSpot: initialSpot,
+          );
+        },
       ),
       GoRoute(
         path: '/spots/:id',

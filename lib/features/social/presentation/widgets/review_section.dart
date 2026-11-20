@@ -21,71 +21,7 @@ class ReviewSection extends ConsumerStatefulWidget {
 }
 
 class _ReviewSectionState extends ConsumerState<ReviewSection> {
-  final TextEditingController _commentController = TextEditingController();
-
-  int _selectedRating = 5;
-  bool _isSubmittingReview = false;
   String? _deletingReviewId;
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submitReview() async {
-    if (_isSubmittingReview) return;
-    final authUser = FirebaseAuth.instance.currentUser;
-    if (authUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng đăng nhập để bình luận.')),
-      );
-      return;
-    }
-
-    final text = _commentController.text.trim();
-    if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng nhập nội dung bình luận.')),
-      );
-      return;
-    }
-
-    setState(() => _isSubmittingReview = true);
-    try {
-      final fallbackName = (authUser.displayName ?? '').trim().isNotEmpty
-          ? authUser.displayName!.trim()
-          : (authUser.email ?? 'Thành viên SpotShare').split('@').first;
-      final fallbackAvatar = authUser.photoURL ?? '';
-
-      await ref.read(reviewRepositoryProvider).addReview(
-            spotId: widget.spot.id,
-            userId: authUser.uid,
-            userName: fallbackName,
-            userAvatar: fallbackAvatar,
-            rating: _selectedRating,
-            comment: text,
-          );
-
-      if (!mounted) return;
-      _commentController.clear();
-      setState(() => _selectedRating = 5);
-      FocusScope.of(context).unfocus();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Đã gửi đánh giá và bình luận!')),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      final message = e.toString().replaceFirst('Exception: ', '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gửi bình luận thất bại: $message')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmittingReview = false);
-      }
-    }
-  }
 
   Future<void> _confirmAndDeleteReview(ReviewModel review) async {
     if (_deletingReviewId != null) return;
@@ -142,93 +78,37 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final colors = Theme.of(context).colorScheme;
     final currentUserId = FirebaseAuth.instance.currentUser?.uid;
     final reviewsAsync = ref.watch(spotReviewsProvider(widget.spot.id));
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Đánh giá & Bình luận (${widget.spot.ratingCount})',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      'Chấm điểm:',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    for (int star = 1; star <= 5; star++)
-                      InkWell(
-                        onTap: _isSubmittingReview
-                            ? null
-                            : () => setState(() => _selectedRating = star),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 2),
-                          child: Icon(
-                            star <= _selectedRating
-                                ? Icons.star_rounded
-                                : Icons.star_border_rounded,
-                            color: Colors.amber.shade600,
-                            size: 28,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: _commentController,
-                  enabled: !_isSubmittingReview,
-                  maxLines: 3,
-                  minLines: 2,
-                  decoration: const InputDecoration(
-                    hintText: 'Chia sẻ trải nghiệm thực tế của bạn tại đây...',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 42),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 10,
-                      ),
-                    ),
-                    onPressed: _isSubmittingReview ? null : _submitReview,
-                    icon: _isSubmittingReview
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send_rounded, size: 18),
-                    label: Text(
-                      _isSubmittingReview ? 'Đang gửi...' : 'Gửi bình luận',
-                    ),
-                  ),
-                ),
-              ],
+        Row(
+          children: [
+            Text(
+              'Bình luận',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: colors.onSurface,
+              ),
             ),
-          ),
+            if (widget.spot.ratingCount > 0) ...[
+              const SizedBox(width: 6),
+              Text(
+                '${widget.spot.ratingCount}',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 14),
         reviewsAsync.when(
           loading: () => const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
@@ -238,8 +118,9 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Text(
               'Không thể tải bình luận: $error',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.error,
+              style: TextStyle(
+                fontSize: 14,
+                color: colors.error,
               ),
             ),
           ),
@@ -249,8 +130,9 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 child: Text(
                   'Chưa có bình luận nào. Hãy là người đầu tiên chia sẻ đánh giá!',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: colors.onSurfaceVariant,
                   ),
                 ),
               );
@@ -260,15 +142,15 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: reviews.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              separatorBuilder: (_, _) => const SizedBox(height: 16),
               itemBuilder: (context, index) {
                 final review = reviews[index];
                 final canDelete =
                     currentUserId != null && currentUserId == review.userId;
                 return ReviewCard(
                   review: review,
-                  formattedDate:
-                      DateTimeHelper.formatFullPostTime(review.createdAt),
+                  spotAuthorId: widget.spot.authorId,
+                  formattedDate: DateTimeHelper.formatCardTime(review.createdAt),
                   canDelete: canDelete,
                   isDeleting: _deletingReviewId == review.id,
                   onDelete:
@@ -279,6 +161,273 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
           },
         ),
       ],
+    );
+  }
+}
+
+class ReviewInputBar extends ConsumerStatefulWidget {
+  const ReviewInputBar({
+    super.key,
+    required this.spot,
+    required this.focusNode,
+  });
+
+  final SpotModel spot;
+  final FocusNode focusNode;
+
+  @override
+  ConsumerState<ReviewInputBar> createState() => _ReviewInputBarState();
+}
+
+class _ReviewInputBarState extends ConsumerState<ReviewInputBar> {
+  final TextEditingController _commentController = TextEditingController();
+
+  int _selectedRating = 5;
+  bool _isSubmitting = false;
+  bool _showRatingPicker = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(_handleFocusChange);
+  }
+
+  @override
+  void didUpdateWidget(covariant ReviewInputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(_handleFocusChange);
+      widget.focusNode.addListener(_handleFocusChange);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_handleFocusChange);
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  void _handleFocusChange() {
+    if (widget.focusNode.hasFocus && !_showRatingPicker) {
+      setState(() => _showRatingPicker = true);
+    } else if (!widget.focusNode.hasFocus &&
+        _commentController.text.trim().isEmpty &&
+        _showRatingPicker) {
+      setState(() => _showRatingPicker = false);
+    }
+  }
+
+  Future<void> _submitReview() async {
+    if (_isSubmitting) return;
+    final authUser = FirebaseAuth.instance.currentUser;
+    if (authUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng đăng nhập để bình luận.')),
+      );
+      return;
+    }
+
+    final text = _commentController.text.trim();
+    if (text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng nhập nội dung bình luận.')),
+      );
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final fallbackName = (authUser.displayName ?? '').trim().isNotEmpty
+          ? authUser.displayName!.trim()
+          : (authUser.email ?? 'Thành viên SpotShare').split('@').first;
+      final fallbackAvatar = authUser.photoURL ?? '';
+
+      await ref.read(reviewRepositoryProvider).addReview(
+            spotId: widget.spot.id,
+            userId: authUser.uid,
+            userName: fallbackName,
+            userAvatar: fallbackAvatar,
+            rating: _selectedRating,
+            comment: text,
+          );
+
+      if (!mounted) return;
+      _commentController.clear();
+      setState(() {
+        _selectedRating = 5;
+        _showRatingPicker = false;
+      });
+      widget.focusNode.unfocus();
+    } catch (e) {
+      if (!mounted) return;
+      final message = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gửi bình luận thất bại: $message')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(
+          top: BorderSide(
+            color: colors.outlineVariant.withValues(alpha: 0.45),
+            width: 0.8,
+          ),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_showRatingPicker)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Đánh giá:',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      for (int star = 1; star <= 5; star++)
+                        InkWell(
+                          onTap: _isSubmitting
+                              ? null
+                              : () => setState(() => _selectedRating = star),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 2),
+                            child: Icon(
+                              star <= _selectedRating
+                                  ? Icons.star_rounded
+                                  : Icons.star_border_rounded,
+                              color: Colors.amber.shade600,
+                              size: 22,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              Row(
+                children: [
+                  InkWell(
+                    onTap: _isSubmitting
+                        ? null
+                        : () => setState(
+                              () => _showRatingPicker = !_showRatingPicker,
+                            ),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      height: 38,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.star_rounded,
+                            size: 16,
+                            color: Colors.amber.shade600,
+                          ),
+                          const SizedBox(width: 3),
+                          Text(
+                            '$_selectedRating',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: colors.onSurface,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _commentController,
+                      focusNode: widget.focusNode,
+                      enabled: !_isSubmitting,
+                      minLines: 1,
+                      maxLines: 3,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: colors.onSurface,
+                      ),
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _submitReview(),
+                      decoration: InputDecoration(
+                        hintText: 'Viết bình luận...',
+                        hintStyle: TextStyle(
+                          fontSize: 14,
+                          color: colors.onSurfaceVariant,
+                        ),
+                        isDense: true,
+                        filled: true,
+                        fillColor: colors.surfaceContainerHighest,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide.none,
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(20),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    onPressed: _isSubmitting ? null : _submitReview,
+                    tooltip: 'Gửi bình luận',
+                    icon: _isSubmitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            Icons.send_rounded,
+                            size: 21,
+                            color: colors.primary,
+                          ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

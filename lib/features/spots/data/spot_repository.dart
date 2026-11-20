@@ -61,6 +61,110 @@ class SpotRepository {
     return spot;
   }
 
+  Future<void> updateSpot({
+    required String spotId,
+    required String currentUserId,
+    required String title,
+    required String description,
+    required String category,
+    required List<String> imageUrls,
+    required double latitude,
+    required double longitude,
+    required String addressText,
+    required String bestTimeTag,
+    required String difficultyTag,
+    required String priceTag,
+  }) async {
+    final docRef = _spotsRef.doc(spotId);
+    final snap = await docRef.get();
+    if (!snap.exists) {
+      throw Exception('Bài đăng không tồn tại hoặc đã bị xóa.');
+    }
+
+    final data = snap.data() ?? const <String, dynamic>{};
+    final authorId = (data['authorId'] as String?) ?? '';
+    if (authorId != currentUserId) {
+      throw Exception('Bạn chỉ có thể chỉnh sửa bài đăng của chính mình.');
+    }
+
+    await docRef.update({
+      'title': title.trim(),
+      'description': description.trim(),
+      'category': category.trim(),
+      'imageUrls': imageUrls,
+      'latitude': latitude,
+      'longitude': longitude,
+      'addressText': addressText.trim(),
+      'bestTimeTag': bestTimeTag.trim(),
+      'difficultyTag': difficultyTag.trim(),
+      'priceTag': priceTag.trim(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> deleteSpot({
+    required String spotId,
+    required String currentUserId,
+  }) async {
+    final spotRef = _spotsRef.doc(spotId);
+    final spotSnap = await spotRef.get();
+    if (!spotSnap.exists) {
+      throw Exception('Bài đăng không tồn tại hoặc đã bị xóa.');
+    }
+
+    final spotData = spotSnap.data() ?? const <String, dynamic>{};
+    final authorId = (spotData['authorId'] as String?) ?? '';
+    if (authorId != currentUserId) {
+      throw Exception('Bạn chỉ có thể xóa bài đăng của chính mình.');
+    }
+
+    final likesCount = (spotData['likesCount'] as num?)?.toInt() ?? 0;
+
+    final refsToDelete = <DocumentReference>[];
+
+    final reviewsSnap = await spotRef.collection('reviews').get();
+    for (final doc in reviewsSnap.docs) {
+      refsToDelete.add(doc.reference);
+    }
+
+    final likesSnap = await spotRef.collection('likes').get();
+    for (final doc in likesSnap.docs) {
+      refsToDelete.add(doc.reference);
+    }
+
+    refsToDelete.add(spotRef);
+
+    const batchLimit = 400;
+    for (int i = 0; i < refsToDelete.length; i += batchLimit) {
+      final end = (i + batchLimit < refsToDelete.length)
+          ? i + batchLimit
+          : refsToDelete.length;
+      final batch = _firestore.batch();
+      for (int j = i; j < end; j++) {
+        batch.delete(refsToDelete[j]);
+      }
+      await batch.commit();
+    }
+
+    final userRef = _usersRef.doc(currentUserId);
+    final userLikedRef = userRef.collection('liked_spots').doc(spotId);
+
+    await _firestore.runTransaction((transaction) async {
+      final userSnap = await transaction.get(userRef);
+      if (userSnap.exists) {
+        final userData = userSnap.data() ?? const <String, dynamic>{};
+        final oldSpots = (userData['spotsCount'] as num?)?.toInt() ?? 0;
+        final oldLikes = (userData['totalLikes'] as num?)?.toInt() ?? 0;
+
+        transaction.update(userRef, {
+          'spotsCount': oldSpots > 0 ? oldSpots - 1 : 0,
+          'totalLikes': oldLikes > likesCount ? oldLikes - likesCount : 0,
+        });
+      }
+      transaction.delete(userLikedRef);
+    });
+  }
+
   Future<List<SpotModel>> fetchExploreFeed({
     int limit = 15,
     String? category,
