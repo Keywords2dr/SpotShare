@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "297728051191",
+    "project_id": "spotshare-cdaa5",
+    "storage_bucket": "spotshare-cdaa5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:297728051191:android:e556a1de0a9cb040ead0f2",
+        "android_client_info": {
+          "package_name": "com.example.spotshare"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "297728051191-ctrl0ac47tui8bjdofc83vsgff973p2l.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1KbxlebWqsoC6w97CaUTxHkmW5Iz_FFY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "297728051191-ctrl0ac47tui8bjdofc83vsgff973p2l.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
