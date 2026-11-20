@@ -1,12 +1,45 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../auth/presentation/auth_providers.dart';
 import '../data/cloudinary_service.dart';
+import '../data/place_search_service.dart';
 import '../data/spot_repository.dart';
+import '../domain/review_model.dart';
 import '../domain/spot_model.dart';
+
+enum ExploreSortMode {
+  trending,
+  newest,
+}
+
+class ExploreSortModeNotifier extends Notifier<ExploreSortMode> {
+  @override
+  ExploreSortMode build() => ExploreSortMode.trending;
+
+  void setMode(ExploreSortMode mode) {
+    state = mode;
+  }
+}
+
+final exploreSortModeProvider =
+    NotifierProvider<ExploreSortModeNotifier, ExploreSortMode>(
+  ExploreSortModeNotifier.new,
+);
+
+double calculateSpotTrendingScore(SpotModel spot, DateTime now) {
+  final engagement = (spot.likesCount * 2.0) +
+      (spot.ratingCount * 3.0) +
+      (spot.ratingAvg * spot.ratingCount * 0.5) +
+      1.0;
+  final createdAt = spot.createdAt ?? now;
+  final ageInHours = math.max(0.0, now.difference(createdAt).inMinutes / 60.0);
+  final gravity = math.pow(ageInHours + 2.0, 1.2).toDouble();
+  return engagement / gravity;
+}
 
 class CreateSpotUploadState {
   const CreateSpotUploadState({
@@ -50,12 +83,66 @@ final cloudinaryServiceProvider = Provider<CloudinaryService>((ref) {
   return CloudinaryService();
 });
 
+final placeSearchServiceProvider = Provider<PlaceSearchService>((ref) {
+  return PlaceSearchService();
+});
+
 final spotRepositoryProvider = Provider<SpotRepository>((ref) {
   return SpotRepository();
 });
 
 final exploreSpotsProvider = StreamProvider<List<SpotModel>>((ref) {
-  return ref.watch(spotRepositoryProvider).watchRecentSpots(limit: 20);
+  return ref.watch(spotRepositoryProvider).watchRecentSpots(limit: 50);
+});
+
+final rankedExploreSpotsProvider = Provider<AsyncValue<List<SpotModel>>>((ref) {
+  final spotsAsync = ref.watch(exploreSpotsProvider);
+  final sortMode = ref.watch(exploreSortModeProvider);
+
+  return spotsAsync.whenData((spots) {
+    final sorted = List<SpotModel>.from(spots);
+    if (sortMode == ExploreSortMode.trending) {
+      final now = DateTime.now();
+      sorted.sort((a, b) {
+        final scoreB = calculateSpotTrendingScore(b, now);
+        final scoreA = calculateSpotTrendingScore(a, now);
+        final scoreCompare = scoreB.compareTo(scoreA);
+        if (scoreCompare != 0) return scoreCompare;
+        final timeB = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final timeA = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return timeB.compareTo(timeA);
+      });
+    } else {
+      sorted.sort((a, b) {
+        final timeB = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final timeA = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return timeB.compareTo(timeA);
+      });
+    }
+    return sorted;
+  });
+});
+
+final spotDetailProvider = StreamProvider.family<SpotModel?, String>((
+  ref,
+  spotId,
+) {
+  return ref.watch(spotRepositoryProvider).watchSpotById(spotId);
+});
+
+final spotLikedProvider = StreamProvider.family<bool, String>((ref, spotId) {
+  final authUser = ref.watch(authStateProvider).value;
+  if (authUser == null) {
+    return Stream.value(false);
+  }
+  return ref
+      .watch(spotRepositoryProvider)
+      .watchIsSpotLiked(spotId, authUser.uid);
+});
+
+final spotReviewsProvider =
+    StreamProvider.family<List<ReviewModel>, String>((ref, spotId) {
+  return ref.watch(spotRepositoryProvider).watchReviews(spotId);
 });
 
 class CreateSpotController extends AsyncNotifier<CreateSpotUploadState> {

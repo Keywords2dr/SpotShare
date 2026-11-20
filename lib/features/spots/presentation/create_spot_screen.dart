@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../data/place_search_service.dart';
 import 'spot_providers.dart';
 
 class CreateSpotScreen extends ConsumerStatefulWidget {
@@ -43,12 +46,19 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
-  final _addressController = TextEditingController();
-  final _latController = TextEditingController(text: '13.7820');
-  final _lngController = TextEditingController(text: '109.2197');
+  final _placeSearchController = TextEditingController();
 
   final ImagePicker _picker = ImagePicker();
   final List<XFile> _selectedImages = [];
+
+  Timer? _debounce;
+  List<PlaceSuggestion> _suggestions = [];
+  bool _isSearchingPlace = false;
+  String? _placeError;
+
+  String _selectedAddress = '';
+  double? _selectedLat;
+  double? _selectedLng;
 
   String _selectedCategory = _categories.first;
   String _selectedBestTime = _bestTimeOptions.first;
@@ -57,12 +67,82 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _titleController.dispose();
     _descriptionController.dispose();
-    _addressController.dispose();
-    _latController.dispose();
-    _lngController.dispose();
+    _placeSearchController.dispose();
     super.dispose();
+  }
+
+  void _onPlaceQueryChanged(String query) {
+    _debounce?.cancel();
+
+    final trimmed = query.trim();
+    if (trimmed.length < 2) {
+      setState(() {
+        _suggestions = [];
+        _placeError = null;
+        _isSearchingPlace = false;
+      });
+      return;
+    }
+
+    _debounce = Timer(const Duration(milliseconds: 600), () {
+      _searchPlaces(trimmed);
+    });
+  }
+
+  Future<void> _searchPlaces(String query) async {
+    final searchService = ref.read(placeSearchServiceProvider);
+
+    setState(() {
+      _isSearchingPlace = true;
+      _placeError = null;
+    });
+
+    try {
+      final results = await searchService.search(query);
+      if (!mounted) return;
+      setState(() {
+        _suggestions = results;
+        _isSearchingPlace = false;
+        if (results.isEmpty) {
+          _placeError = 'Không tìm thấy địa chỉ phù hợp. Thử nhập thêm tên tỉnh/thành phố.';
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _suggestions = [];
+        _isSearchingPlace = false;
+        _placeError = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  void _selectSuggestion(PlaceSuggestion suggestion) {
+    setState(() {
+      _selectedAddress = suggestion.fullText;
+      _selectedLat = suggestion.latitude;
+      _selectedLng = suggestion.longitude;
+      _placeSearchController.text = suggestion.fullText;
+      if (_titleController.text.trim().isEmpty && suggestion.mainText.isNotEmpty) {
+        _titleController.text = suggestion.mainText;
+      }
+      _suggestions = [];
+      _placeError = null;
+    });
+  }
+
+  void _clearSelectedPlace() {
+    setState(() {
+      _placeSearchController.clear();
+      _selectedAddress = '';
+      _selectedLat = null;
+      _selectedLng = null;
+      _suggestions = [];
+      _placeError = null;
+    });
   }
 
   Future<void> _pickImages() async {
@@ -109,11 +189,15 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
       return;
     }
 
-    final lat = double.tryParse(_latController.text.trim());
-    final lng = double.tryParse(_lngController.text.trim());
-    if (lat == null || lng == null || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    if (_selectedLat == null ||
+        _selectedLng == null ||
+        _selectedAddress.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tọa độ GPS (Vĩ độ / Kinh độ) không hợp lệ.')),
+        const SnackBar(
+          content: Text(
+            'Vui lòng tìm và chọn địa chỉ từ danh sách gợi ý.',
+          ),
+        ),
       );
       return;
     }
@@ -123,9 +207,9 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
           description: _descriptionController.text,
           category: _selectedCategory,
           pickedImages: List<XFile>.from(_selectedImages),
-          latitude: lat,
-          longitude: lng,
-          addressText: _addressController.text,
+          latitude: _selectedLat!,
+          longitude: _selectedLng!,
+          addressText: _selectedAddress,
           bestTimeTag: _selectedBestTime,
           difficultyTag: _selectedDifficulty,
           priceTag: _selectedPrice,
@@ -136,7 +220,7 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
     if (ok) {
       _titleController.clear();
       _descriptionController.clear();
-      _addressController.clear();
+      _clearSelectedPlace();
       setState(() {
         _selectedImages.clear();
       });
@@ -182,14 +266,17 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<AsyncValue<CreateSpotUploadState>>(createSpotControllerProvider, (_, next) {
-      if (next.hasError && mounted) {
-        final message = next.error.toString().replaceFirst('Exception: ', '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
-      }
-    });
+    ref.listen<AsyncValue<CreateSpotUploadState>>(
+      createSpotControllerProvider,
+      (_, next) {
+        if (next.hasError && mounted) {
+          final message = next.error.toString().replaceFirst('Exception: ', '');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+        }
+      },
+    );
 
     final asyncState = ref.watch(createSpotControllerProvider);
     final uploadState = asyncState.value ?? const CreateSpotUploadState();
@@ -226,7 +313,8 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
               height: 108,
               child: ListView.separated(
                 scrollDirection: Axis.horizontal,
-                itemCount: _selectedImages.length + (_selectedImages.length < 6 ? 1 : 0),
+                itemCount:
+                    _selectedImages.length + (_selectedImages.length < 6 ? 1 : 0),
                 separatorBuilder: (_, _) => const SizedBox(width: 10),
                 itemBuilder: (context, index) {
                   if (index == _selectedImages.length) {
@@ -340,6 +428,121 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
             ],
             const SizedBox(height: 18),
             TextFormField(
+              controller: _placeSearchController,
+              enabled: !isBusy,
+              onChanged: _onPlaceQueryChanged,
+              decoration: InputDecoration(
+                labelText: 'Tìm địa chỉ (OpenStreetMap) *',
+                hintText: 'VD: Eo Gió Quy Nhơn, Hồ Xuân Hương Đà Lạt...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _isSearchingPlace
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : (_placeSearchController.text.isNotEmpty
+                        ? IconButton(
+                            onPressed: isBusy ? null : _clearSelectedPlace,
+                            icon: const Icon(Icons.clear),
+                          )
+                        : null),
+              ),
+            ),
+            if (_placeError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _placeError!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ],
+            if (_suggestions.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Card(
+                margin: EdgeInsets.zero,
+                clipBehavior: Clip.antiAlias,
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: _suggestions.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final item = _suggestions[index];
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        Icons.location_on_outlined,
+                        color: theme.colorScheme.primary,
+                      ),
+                      title: Text(
+                        item.mainText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: item.secondaryText.isNotEmpty
+                          ? Text(
+                              item.secondaryText,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            )
+                          : null,
+                      onTap: () => _selectSuggestion(item),
+                    );
+                  },
+                ),
+              ),
+            ],
+            if (_selectedLat != null && _selectedLng != null) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      color: theme.colorScheme.primary,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _selectedAddress,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'GPS: ${_selectedLat!.toStringAsFixed(5)}, ${_selectedLng!.toStringAsFixed(5)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            TextFormField(
               controller: _titleController,
               enabled: !isBusy,
               textInputAction: TextInputAction.next,
@@ -380,57 +583,6 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                 }
                 return null;
               },
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: _addressController,
-              enabled: !isBusy,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: 'Địa chỉ / Khu vực *',
-                hintText: 'VD: Nhơn Lý, Quy Nhơn, Gia Lai',
-                prefixIcon: Icon(Icons.location_on_outlined),
-              ),
-              validator: (value) {
-                if ((value?.trim() ?? '').isEmpty) {
-                  return 'Vui lòng nhập địa chỉ hoặc khu vực';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: _latController,
-                    enabled: !isBusy,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Vĩ độ (Lat)',
-                      prefixIcon: Icon(Icons.my_location),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    controller: _lngController,
-                    enabled: !isBusy,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                      signed: true,
-                    ),
-                    decoration: const InputDecoration(
-                      labelText: 'Kinh độ (Lng)',
-                      prefixIcon: Icon(Icons.explore_outlined),
-                    ),
-                  ),
-                ),
-              ],
             ),
             const SizedBox(height: 18),
             _buildChoiceSection(

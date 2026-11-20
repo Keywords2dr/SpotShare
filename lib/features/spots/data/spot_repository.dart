@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../domain/review_model.dart';
 import '../domain/spot_model.dart';
 
 class SpotRepository {
@@ -26,6 +27,11 @@ class SpotRepository {
     required String authorAvatar,
   }) async {
     final docRef = _spotsRef.doc();
+    final userSnap = await _usersRef.doc(authorId).get();
+    final userData = userSnap.data() ?? const <String, dynamic>{};
+    final dbName = (userData['displayName'] as String?)?.trim() ?? '';
+    final dbAvatar = (userData['avatarUrl'] as String?)?.trim() ?? '';
+
     final spot = SpotModel(
       id: docRef.id,
       title: title.trim(),
@@ -39,8 +45,8 @@ class SpotRepository {
       difficultyTag: difficultyTag.trim(),
       priceTag: priceTag.trim(),
       authorId: authorId,
-      authorName: authorName.trim(),
-      authorAvatar: authorAvatar.trim(),
+      authorName: dbName.isNotEmpty ? dbName : authorName.trim(),
+      authorAvatar: dbAvatar.isNotEmpty ? dbAvatar : authorAvatar.trim(),
     );
 
     await docRef.set(spot.toCreateMap());
@@ -83,5 +89,182 @@ class SpotRepository {
           (snapshot) =>
               snapshot.docs.map((doc) => SpotModel.fromFirestore(doc)).toList(),
         );
+  }
+
+  Stream<SpotModel?> watchSpotById(String spotId) {
+    return _spotsRef.doc(spotId).snapshots().map((snapshot) {
+      if (!snapshot.exists) return null;
+      return SpotModel.fromFirestore(snapshot);
+    });
+  }
+
+  Stream<bool> watchIsSpotLiked(String spotId, String userId) {
+    return _spotsRef
+        .doc(spotId)
+        .collection('likes')
+        .doc(userId)
+        .snapshots()
+        .map((doc) => doc.exists);
+  }
+
+  Future<bool> toggleLike({
+    required String spotId,
+    required String userId,
+    required String authorId,
+  }) async {
+    final spotRef = _spotsRef.doc(spotId);
+    final likeRef = spotRef.collection('likes').doc(userId);
+    final authorRef = _usersRef.doc(authorId);
+
+    return _firestore.runTransaction((transaction) async {
+      final spotSnap = await transaction.get(spotRef);
+      if (!spotSnap.exists) {
+        throw Exception('Địa điểm không tồn tại.');
+      }
+
+      final likeSnap = await transaction.get(likeRef);
+      final spotData = spotSnap.data() ?? const <String, dynamic>{};
+      final currentLikes = (spotData['likesCount'] as num?)?.toInt() ?? 0;
+
+      if (likeSnap.exists) {
+        transaction.delete(likeRef);
+        transaction.update(spotRef, {
+          'likesCount': currentLikes > 0 ? currentLikes - 1 : 0,
+        });
+        if (authorId.isNotEmpty) {
+          transaction.set(
+            authorRef,
+            {'totalLikes': FieldValue.increment(-1)},
+            SetOptions(merge: true),
+          );
+        }
+        return false;
+      } else {
+        transaction.set(likeRef, {
+          'userId': userId,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        transaction.update(spotRef, {
+          'likesCount': currentLikes + 1,
+        });
+        if (authorId.isNotEmpty) {
+          transaction.set(
+            authorRef,
+            {'totalLikes': FieldValue.increment(1)},
+            SetOptions(merge: true),
+          );
+        }
+        return true;
+      }
+    });
+  }
+
+  Stream<List<ReviewModel>> watchReviews(String spotId) {
+    return _spotsRef
+        .doc(spotId)
+        .collection('reviews')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map(
+          (snapshot) =>
+              snapshot.docs.map((doc) => ReviewModel.fromFirestore(doc)).toList(),
+        );
+  }
+
+  Future<void> addReview({
+    required String spotId,
+    required String userId,
+    required String userName,
+    required String userAvatar,
+    required int rating,
+    required String comment,
+    List<String> photoUrls = const [],
+  }) async {
+    final trimmedComment = comment.trim();
+    if (trimmedComment.isEmpty) {
+      throw Exception('Vui lòng nhập nội dung bình luận.');
+    }
+
+    final spotRef = _spotsRef.doc(spotId);
+    final userRef = _usersRef.doc(userId);
+    final reviewRef = spotRef.collection('reviews').doc();
+
+    await _firestore.runTransaction((transaction) async {
+      final spotSnap = await transaction.get(spotRef);
+      if (!spotSnap.exists) {
+        throw Exception('Địa điểm không tồn tại.');
+      }
+
+      final userSnap = await transaction.get(userRef);
+      final userData = userSnap.data() ?? const <String, dynamic>{};
+      final dbName = (userData['displayName'] as String?)?.trim() ?? '';
+      final dbAvatar = (userData['avatarUrl'] as String?)?.trim() ?? '';
+
+      final review = ReviewModel(
+        id: reviewRef.id,
+        userId: userId,
+        userName: dbName.isNotEmpty ? dbName : userName.trim(),
+        userAvatar: dbAvatar.isNotEmpty ? dbAvatar : userAvatar.trim(),
+        rating: rating.clamp(1, 5),
+        comment: trimmedComment,
+        photoUrls: photoUrls,
+      );
+
+      final spotData = spotSnap.data() ?? const <String, dynamic>{};
+      final oldCount = (spotData['ratingCount'] as num?)?.toInt() ?? 0;
+      final oldAvg = (spotData['ratingAvg'] as num?)?.toDouble() ?? 0.0;
+
+      final newCount = oldCount + 1;
+      final newAvg = ((oldAvg * oldCount) + review.rating) / newCount;
+
+      transaction.set(reviewRef, review.toCreateMap());
+      transaction.update(spotRef, {
+        'ratingCount': newCount,
+        'ratingAvg': double.parse(newAvg.toStringAsFixed(2)),
+      });
+    });
+  }
+
+  Future<void> deleteReview({
+    required String spotId,
+    required String reviewId,
+    required String userId,
+  }) async {
+    final spotRef = _spotsRef.doc(spotId);
+    final reviewRef = spotRef.collection('reviews').doc(reviewId);
+
+    await _firestore.runTransaction((transaction) async {
+      final spotSnap = await transaction.get(spotRef);
+      if (!spotSnap.exists) {
+        throw Exception('Địa điểm không tồn tại.');
+      }
+
+      final reviewSnap = await transaction.get(reviewRef);
+      if (!reviewSnap.exists) {
+        throw Exception('Bình luận không tồn tại hoặc đã bị xóa.');
+      }
+
+      final reviewData = reviewSnap.data() ?? const <String, dynamic>{};
+      final reviewOwnerId = (reviewData['userId'] as String?) ?? '';
+      if (reviewOwnerId != userId) {
+        throw Exception('Bạn chỉ có thể xóa bình luận của chính mình.');
+      }
+
+      final removedRating = (reviewData['rating'] as num?)?.toInt() ?? 0;
+      final spotData = spotSnap.data() ?? const <String, dynamic>{};
+      final oldCount = (spotData['ratingCount'] as num?)?.toInt() ?? 0;
+      final oldAvg = (spotData['ratingAvg'] as num?)?.toDouble() ?? 0.0;
+
+      final newCount = oldCount > 1 ? oldCount - 1 : 0;
+      final newAvg = newCount == 0
+          ? 0.0
+          : (((oldAvg * oldCount) - removedRating) / newCount).clamp(0.0, 5.0);
+
+      transaction.delete(reviewRef);
+      transaction.update(spotRef, {
+        'ratingCount': newCount,
+        'ratingAvg': double.parse(newAvg.toStringAsFixed(2)),
+      });
+    });
   }
 }
