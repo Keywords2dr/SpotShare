@@ -1,5 +1,5 @@
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,8 +12,10 @@ import '../../../social/presentation/social_providers.dart';
 import '../../../social/presentation/widgets/review_section.dart';
 import '../../domain/spot_model.dart';
 import '../../domain/spot_tag_presets.dart';
+import '../like/spot_like_controller.dart';
 import '../spot_providers.dart';
 import '../widgets/spot_tag_selector.dart';
+import 'spot_detail_support.dart';
 import 'widgets/spot_image_carousel.dart';
 
 class SpotDetailScreen extends ConsumerStatefulWidget {
@@ -33,8 +35,8 @@ class SpotDetailScreen extends ConsumerStatefulWidget {
 class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
   final FocusNode _commentFocusNode = FocusNode();
 
-  bool _isTogglingLike = false;
   bool _isTogglingSave = false;
+  bool? _pendingSaved;
   bool _isDeletingSpot = false;
 
   @override
@@ -43,88 +45,169 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
     super.dispose();
   }
 
-  Future<void> _toggleLike(SpotModel spot) async {
-    if (_isTogglingLike) return;
-    final authUser = FirebaseAuth.instance.currentUser;
-    if (authUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng đăng nhập để thả tim.')),
+  void _showSnackBar(String message) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _navigateBack() {
+    final router = GoRouter.maybeOf(context);
+    if (router != null) {
+      if (router.canPop()) {
+        router.pop();
+      } else {
+        router.go('/explore');
+      }
+      return;
+    }
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _refreshSpot() async {
+    final userId = ref.read(spotDetailCurrentUserIdProvider) ?? '';
+    ref.invalidate(spotDetailProvider(widget.spotId));
+    ref.invalidate(spotSavedProvider(widget.spotId));
+    if (userId.isNotEmpty) {
+      ref.invalidate(
+        spotIsLikedStreamProvider((spotId: widget.spotId, userId: userId)),
       );
+    }
+    try {
+      await ref.read(spotDetailProvider(widget.spotId).future);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleLike({
+    required SpotModel spot,
+    required bool currentLiked,
+    required int currentLikesCount,
+  }) async {
+    final userId = ref.read(spotDetailCurrentUserIdProvider);
+    if (userId == null || userId.isEmpty) {
+      _showSnackBar('Vui lòng đăng nhập để thả tim địa điểm.');
       return;
     }
 
-    setState(() => _isTogglingLike = true);
-    try {
-      await ref.read(interactionRepositoryProvider).toggleLike(
-            spotId: spot.id,
-            userId: authUser.uid,
-            authorId: spot.authorId,
-          );
-    } catch (e) {
-      if (!mounted) return;
-      final message = e.toString().replaceFirst('Exception: ', '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Không thể cập nhật lượt thích: $message')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isTogglingLike = false);
-      }
+    final outcome =
+        await ref.read(spotLikeControllerProvider.notifier).toggleLike(
+              spotId: spot.id,
+              userId: userId,
+              fallbackIsLiked: currentLiked,
+              fallbackLikesCount: currentLikesCount,
+              authorId: spot.authorId,
+            );
+
+    if (!outcome.success && !outcome.ignored && outcome.errorMessage != null) {
+      _showSnackBar(outcome.errorMessage!);
     }
   }
 
-  Future<void> _toggleSave(SpotModel spot) async {
+  Future<void> _toggleSave({
+    required SpotModel spot,
+    required bool currentSaved,
+  }) async {
     if (_isTogglingSave) return;
-    final authUser = FirebaseAuth.instance.currentUser;
-    if (authUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng đăng nhập để lưu địa điểm.')),
-      );
+    final userId = ref.read(spotDetailCurrentUserIdProvider);
+    if (userId == null || userId.isEmpty) {
+      _showSnackBar('Vui lòng đăng nhập để lưu địa điểm.');
       return;
     }
 
-    setState(() => _isTogglingSave = true);
+    final nextSaved = !currentSaved;
+    setState(() {
+      _isTogglingSave = true;
+      _pendingSaved = nextSaved;
+    });
+
     try {
       final saved =
           await ref.read(interactionRepositoryProvider).toggleSaveSpot(
                 spotId: spot.id,
-                userId: authUser.uid,
+                userId: userId,
               );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            saved ? 'Đã lưu vào mục Đã lưu.' : 'Đã bỏ khỏi mục Đã lưu.',
-          ),
-        ),
+      final latestSaved = ref.read(spotSavedProvider(spot.id)).value;
+      setState(() {
+        _isTogglingSave = false;
+        _pendingSaved = latestSaved == saved ? null : saved;
+      });
+      _showSnackBar(
+        saved ? 'Đã lưu vào mục Đã lưu.' : 'Đã bỏ khỏi mục Đã lưu.',
       );
     } catch (e) {
-      if (!mounted) return;
-      final message = e.toString().replaceFirst('Exception: ', '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Không thể lưu địa điểm: $message')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isTogglingSave = false);
+      if (kDebugMode) {
+        debugPrint('[SpotDetailScreen] toggleSave failed: $e');
       }
+      if (!mounted) return;
+      setState(() {
+        _isTogglingSave = false;
+        _pendingSaved = null;
+      });
+      _showSnackBar(
+        SpotDetailErrorMapper.map(
+          e,
+          fallback: 'Không thể lưu địa điểm lúc này. Vui lòng thử lại.',
+        ),
+      );
     }
   }
 
   Future<void> _copyCoordinates(SpotModel spot) async {
-    final coords =
-        '${spot.latitude.toStringAsFixed(5)}, ${spot.longitude.toStringAsFixed(5)}';
+    final coords = SpotCoordinatesHelper.format(spot.latitude, spot.longitude);
     await Clipboard.setData(ClipboardData(text: coords));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Đã sao chép tọa độ: $coords')),
+    _showSnackBar('Đã sao chép tọa độ: $coords');
+  }
+
+  Future<void> _copyMapsLink(SpotModel spot) async {
+    final url = SpotCoordinatesHelper.googleMapsUrl(
+      spot.latitude,
+      spot.longitude,
     );
+    await Clipboard.setData(ClipboardData(text: url));
+    _showSnackBar('Đã sao chép đường dẫn chỉ đường Google Maps.');
+  }
+
+  Future<void> _copyShareSummary(SpotModel spot) async {
+    final text = SpotCoordinatesHelper.buildShareSummary(
+      title: spot.title,
+      category: spot.category,
+      addressText: spot.addressText,
+      latitude: spot.latitude,
+      longitude: spot.longitude,
+    );
+    await Clipboard.setData(ClipboardData(text: text));
+    _showSnackBar('Đã sao chép thông tin địa điểm để chia sẻ.');
+  }
+
+  Future<void> _openReportSheet(SpotModel spot) async {
+    final userId = ref.read(spotDetailCurrentUserIdProvider);
+    if (userId == null || userId.isEmpty) {
+      _showSnackBar('Vui lòng đăng nhập để báo cáo nội dung vi phạm.');
+      return;
+    }
+
+    final reported = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => SpotReportSheet(
+        spotId: spot.id,
+        spotTitle: spot.title,
+        reporterId: userId,
+      ),
+    );
+
+    if (reported == true) {
+      _showSnackBar('Cảm ơn bạn! Báo cáo đã được gửi để kiểm duyệt.');
+    }
   }
 
   Future<void> _confirmAndDeleteSpot(SpotModel spot) async {
     if (_isDeletingSpot) return;
-    final authUser = FirebaseAuth.instance.currentUser;
-    if (authUser == null || authUser.uid != spot.authorId) return;
+    final userId = ref.read(spotDetailCurrentUserIdProvider);
+    if (userId == null || userId != spot.authorId) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -161,29 +244,66 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
     try {
       await ref.read(spotRepositoryProvider).deleteSpot(
             spotId: spot.id,
-            currentUserId: authUser.uid,
+            currentUserId: userId,
           );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Đã xóa bài đăng.')),
-      );
-      if (context.canPop()) {
-        context.pop();
-      } else {
-        context.go('/explore');
-      }
+      _showSnackBar('Đã xóa bài đăng.');
+      _navigateBack();
     } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[SpotDetailScreen] deleteSpot failed: $e');
+      }
       if (!mounted) return;
-      final message = e.toString().replaceFirst('Exception: ', '');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Xóa bài đăng thất bại: $message')),
-      );
       setState(() => _isDeletingSpot = false);
+      _showSnackBar(
+        SpotDetailErrorMapper.map(
+          e,
+          fallback: 'Xóa bài đăng thất bại. Vui lòng thử lại.',
+        ),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final currentUserId = ref.watch(spotDetailCurrentUserIdProvider) ?? '';
+
+    ref.listen<AsyncValue<SpotModel?>>(spotDetailProvider(widget.spotId),
+        (_, next) {
+      final nextSpot = next.value;
+      if (nextSpot == null) return;
+      final existing = ref.read(spotLikeControllerProvider)[nextSpot.id];
+      if (existing == null || existing.isProcessing) return;
+      final latestLiked = currentUserId.isEmpty
+          ? false
+          : (ref
+                  .read(
+                    spotIsLikedStreamProvider(
+                      (spotId: nextSpot.id, userId: currentUserId),
+                    ),
+                  )
+                  .value ??
+              existing.isLiked);
+      if (latestLiked == existing.isLiked) {
+        ref.read(spotLikeControllerProvider.notifier).syncFromServer(
+              spotId: nextSpot.id,
+              isLiked: latestLiked,
+              likesCount: nextSpot.likesCount,
+            );
+      }
+    });
+
+    ref.listen<AsyncValue<bool>>(spotSavedProvider(widget.spotId), (_, next) {
+      final serverSaved = next.value;
+      if (!_isTogglingSave &&
+          _pendingSaved != null &&
+          serverSaved == _pendingSaved) {
+        setState(() {
+          _pendingSaved = null;
+        });
+      }
+    });
+
     final spotAsync = ref.watch(spotDetailProvider(widget.spotId));
     final spot = spotAsync.value ?? widget.initialSpot;
 
@@ -194,19 +314,61 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
       );
     }
 
-    if (spot == null) {
+    if (spot == null && spotAsync.hasError) {
       return Scaffold(
         appBar: AppBar(),
-        body: const Center(
-          child: Text('Không tìm thấy địa điểm này hoặc bài viết đã bị xóa.'),
+        body: SpotDetailErrorView(
+          icon: Icons.wifi_off_rounded,
+          title: 'Không thể tải địa điểm',
+          message: SpotDetailErrorMapper.map(
+            spotAsync.error!,
+            fallback: 'Không thể tải thông tin địa điểm lúc này. Vui lòng thử lại.',
+          ),
+          onRetry: _refreshSpot,
+          onBack: _navigateBack,
         ),
       );
     }
 
-    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
-    final isOwner = currentUserId != null && currentUserId == spot.authorId;
-    final isLiked = ref.watch(spotLikedProvider(spot.id)).value ?? false;
-    final isSaved = ref.watch(spotSavedProvider(spot.id)).value ?? false;
+    if (spot == null) {
+      return Scaffold(
+        appBar: AppBar(),
+        body: SpotDetailErrorView(
+          icon: Icons.location_off_outlined,
+          title: 'Không tìm thấy địa điểm',
+          message: 'Địa điểm này có thể đã bị tác giả xóa hoặc liên kết không còn hợp lệ.',
+          onBack: _navigateBack,
+        ),
+      );
+    }
+
+    final isOwner = currentUserId.isNotEmpty && currentUserId == spot.authorId;
+
+    final serverLiked = currentUserId.isEmpty
+        ? false
+        : (ref
+                .watch(
+                  spotIsLikedStreamProvider(
+                    (spotId: spot.id, userId: currentUserId),
+                  ),
+                )
+                .value ??
+            false);
+    final likeOverride = ref.watch(
+      spotLikeControllerProvider.select((map) => map[spot.id]),
+    );
+    final displayLiked = likeOverride?.isLiked ?? serverLiked;
+    final displayLikesCount = likeOverride?.likesCount ??
+        (spot.likesCount < 0 ? 0 : spot.likesCount);
+    final isLikeProcessing = likeOverride?.isProcessing ?? false;
+
+    final serverSaved = ref.watch(spotSavedProvider(spot.id)).value ?? false;
+    final displaySaved = SpotOptimisticResolver.resolveBool(
+      serverValue: serverSaved,
+      pendingValue: _pendingSaved,
+      isProcessing: _isTogglingSave,
+    );
+
     final liveAuthorAvatar =
         ref.watch(userAvatarProvider(spot.authorId)).value ?? '';
     final rawAuthorAvatar =
@@ -218,141 +380,203 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final transportTags = SpotTagPresets.parseMultiTag(spot.difficultyTag);
-    final hasTags = spot.bestTimeTag.isNotEmpty ||
-        transportTags.isNotEmpty ||
-        spot.priceTag.isNotEmpty;
+    final quickTags = <SpotQuickTagData>[
+      if (spot.bestTimeTag.isNotEmpty)
+        SpotQuickTagData(
+          icon: Icons.wb_sunny_outlined,
+          label: spot.bestTimeTag,
+        ),
+      for (final transport in transportTags)
+        SpotQuickTagData(
+          icon: transportIconFor(transport),
+          label: transport,
+        ),
+      if (spot.priceTag.isNotEmpty)
+        SpotQuickTagData(
+          icon: Icons.payments_outlined,
+          label: spot.priceTag,
+        ),
+    ];
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
         toolbarHeight: 60,
-        title: Row(
-          children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundImage: authorAvatarUrl.isNotEmpty
-                  ? CachedNetworkImageProvider(authorAvatarUrl)
-                  : null,
-              child: authorAvatarUrl.isEmpty
-                  ? Text(
-                      spot.authorName.isNotEmpty
-                          ? spot.authorName[0].toUpperCase()
-                          : 'S',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    spot.authorName.isNotEmpty
-                        ? spot.authorName
-                        : 'Thành viên SpotShare',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: colors.onSurface,
-                      height: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 1),
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          '${DateTimeHelper.formatCardTime(spot.createdAt)} · ${spot.category}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            fontWeight: FontWeight.w400,
-                            color: colors.onSurfaceVariant,
-                            height: 1.25,
+        title: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: spot.authorId.isNotEmpty
+              ? () => context.push('/users/${spot.authorId}')
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundImage: authorAvatarUrl.isNotEmpty
+                      ? CachedNetworkImageProvider(authorAvatarUrl)
+                      : null,
+                  child: authorAvatarUrl.isEmpty
+                      ? Text(
+                          spot.authorName.isNotEmpty
+                              ? spot.authorName[0].toUpperCase()
+                              : 'S',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           ),
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        spot.authorName.isNotEmpty
+                            ? spot.authorName
+                            : 'Thành viên SpotShare',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: colors.onSurface,
+                          height: 1.25,
                         ),
                       ),
-                      const SizedBox(width: 4),
-                      Icon(
-                        Icons.public,
-                        size: 13,
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          if (isOwner)
-            _isDeletingSpot
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : PopupMenuButton<String>(
-                    icon: Icon(
-                      Icons.more_horiz_rounded,
-                      color: colors.onSurface,
-                    ),
-                    tooltip: 'Tùy chọn bài viết',
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        context.push('/spots/${spot.id}/edit', extra: spot);
-                      } else if (value == 'delete') {
-                        _confirmAndDeleteSpot(spot);
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem<String>(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            Icon(Icons.edit_outlined, size: 20),
-                            SizedBox(width: 10),
-                            Text(
-                              'Chỉnh sửa bài viết',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.delete_outline_rounded,
-                              size: 20,
-                              color: colors.error,
-                            ),
-                            const SizedBox(width: 10),
-                            Text(
-                              'Xóa bài viết',
+                      const SizedBox(height: 1),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '${DateTimeHelper.formatCardTime(spot.createdAt)} · ${spot.category}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                color: colors.error,
-                                fontWeight: FontWeight.w700,
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w400,
+                                color: colors.onSurfaceVariant,
+                                height: 1.25,
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.public,
+                            size: 13,
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ],
                       ),
                     ],
                   ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          if (_isDeletingSpot)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else
+            PopupMenuButton<String>(
+              icon: Icon(
+                Icons.more_horiz_rounded,
+                color: colors.onSurface,
+              ),
+              tooltip: 'Tùy chọn bài viết',
+              onSelected: (value) {
+                if (value == 'share') {
+                  _copyShareSummary(spot);
+                } else if (value == 'edit') {
+                  context.push('/spots/${spot.id}/edit', extra: spot);
+                } else if (value == 'delete') {
+                  _confirmAndDeleteSpot(spot);
+                } else if (value == 'report') {
+                  _openReportSheet(spot);
+                }
+              },
+              itemBuilder: (context) => [
+                const PopupMenuItem<String>(
+                  value: 'share',
+                  child: Row(
+                    children: [
+                      Icon(Icons.share_outlined, size: 20),
+                      SizedBox(width: 10),
+                      Text(
+                        'Sao chép chia sẻ',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isOwner) ...[
+                  const PopupMenuItem<String>(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined, size: 20),
+                        SizedBox(width: 10),
+                        Text(
+                          'Chỉnh sửa bài viết',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.delete_outline_rounded,
+                          size: 20,
+                          color: colors.error,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Xóa bài viết',
+                          style: TextStyle(
+                            color: colors.error,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else
+                  PopupMenuItem<String>(
+                    value: 'report',
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.flag_outlined,
+                          size: 20,
+                          color: colors.error,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Báo cáo vi phạm',
+                          style: TextStyle(
+                            color: colors.error,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(0.6),
@@ -364,341 +588,161 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
       ),
       body: Column(
         children: [
-          Expanded(
-            child: ListView(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        spot.title,
+          if (spotAsync.hasError)
+            Material(
+              color: colors.errorContainer.withValues(alpha: 0.72),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.cloud_off_rounded,
+                      size: 16,
+                      color: colors.onErrorContainer,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Đang hiển thị dữ liệu đã lưu tạm. Chạm Thử lại để đồng bộ.',
                         style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w700,
-                          color: colors.onSurface,
-                          height: 1.3,
-                          letterSpacing: -0.2,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: colors.onErrorContainer,
                         ),
                       ),
-                      if (spot.description.trim().isNotEmpty) ...[
-                        const SizedBox(height: 6),
+                    ),
+                    TextButton(
+                      onPressed: _refreshSpot,
+                      style: TextButton.styleFrom(
+                        foregroundColor: colors.onErrorContainer,
+                        minimumSize: Size.zero,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'Thử lại',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _refreshSpot,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                         Text(
-                          spot.description,
+                          spot.title,
                           style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w400,
-                            color: colors.onSurface.withValues(alpha: 0.88),
-                            height: 1.48,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: colors.onSurface,
+                            height: 1.3,
+                            letterSpacing: -0.2,
                           ),
                         ),
-                      ],
-                      if (spot.addressText.trim().isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.only(top: 1.5),
-                              child: Icon(
-                                Icons.location_on_outlined,
-                                size: 15,
-                                color: colors.onSurfaceVariant,
-                              ),
+                        if (spot.description.trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            spot.description,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w400,
+                              color: colors.onSurface.withValues(alpha: 0.88),
+                              height: 1.48,
                             ),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text(
-                                spot.addressText,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
+                          ),
+                        ],
+                        if (spot.addressText.trim().isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(top: 1.5),
+                                child: Icon(
+                                  Icons.location_on_outlined,
+                                  size: 15,
                                   color: colors.onSurfaceVariant,
-                                  height: 1.35,
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                SpotImageCarousel(images: spot.imageUrls),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    children: [
-                      _ActionCounterButton(
-                        icon: isLiked
-                            ? Icons.favorite_rounded
-                            : Icons.favorite_border_rounded,
-                        activeColor: Colors.redAccent,
-                        isActive: isLiked,
-                        label: '${spot.likesCount}',
-                        onTap: _isTogglingLike ? null : () => _toggleLike(spot),
-                      ),
-                      const SizedBox(width: 6),
-                      _ActionCounterButton(
-                        icon: Icons.chat_bubble_outline_rounded,
-                        label: '${spot.ratingCount}',
-                        onTap: () => _commentFocusNode.requestFocus(),
-                      ),
-                      const SizedBox(width: 6),
-                      _ActionCounterButton(
-                        icon: isSaved
-                            ? Icons.bookmark_rounded
-                            : Icons.bookmark_border_rounded,
-                        activeColor: colors.primary,
-                        isActive: isSaved,
-                        label: isSaved ? 'Đã lưu' : 'Lưu',
-                        onTap: _isTogglingSave ? null : () => _toggleSave(spot),
-                      ),
-                      const Spacer(),
-                      Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.star_rounded,
-                              size: 17,
-                              color: Colors.amber.shade600,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              spot.ratingCount > 0
-                                  ? spot.ratingAvg.toStringAsFixed(1)
-                                  : 'Chưa có',
-                              style: TextStyle(
-                                fontSize: 13.5,
-                                fontWeight: FontWeight.w700,
-                                color: colors.onSurface,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (hasTags || spot.latitude != 0 || spot.longitude != 0)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceContainerLow,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: colors.outlineVariant.withValues(alpha: 0.45),
-                          width: 0.8,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (hasTags)
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                if (spot.bestTimeTag.isNotEmpty)
-                                  _QuickTagChip(
-                                    icon: Icons.wb_sunny_outlined,
-                                    label: spot.bestTimeTag,
-                                  ),
-                                for (final transport in transportTags)
-                                  _QuickTagChip(
-                                    icon: transportIconFor(transport),
-                                    label: transport,
-                                  ),
-                                if (spot.priceTag.isNotEmpty)
-                                  _QuickTagChip(
-                                    icon: Icons.payments_outlined,
-                                    label: spot.priceTag,
-                                  ),
-                              ],
-                            ),
-                          if (hasTags) const SizedBox(height: 10),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.my_location_rounded,
-                                size: 14,
-                                color: colors.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 6),
+                              const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  'Tọa độ: ${spot.latitude.toStringAsFixed(5)}, ${spot.longitude.toStringAsFixed(5)}',
+                                  spot.addressText,
                                   style: TextStyle(
-                                    fontSize: 12.5,
-                                    fontWeight: FontWeight.w400,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
                                     color: colors.onSurfaceVariant,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Material(
-                                color: colors.primaryContainer
-                                    .withValues(alpha: 0.65),
-                                shape: StadiumBorder(
-                                  side: BorderSide(
-                                    color:
-                                        colors.primary.withValues(alpha: 0.35),
-                                    width: 0.8,
-                                  ),
-                                ),
-                                clipBehavior: Clip.antiAlias,
-                                child: InkWell(
-                                  onTap: () => _copyCoordinates(spot),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 9,
-                                      vertical: 4,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.copy_rounded,
-                                          size: 12.5,
-                                          color: colors.primary,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          'Sao chép',
-                                          style: TextStyle(
-                                            fontSize: 11.5,
-                                            fontWeight: FontWeight.w700,
-                                            color: colors.primary,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                    height: 1.35,
                                   ),
                                 ),
                               ),
                             ],
                           ),
                         ],
-                      ),
+                      ],
                     ),
                   ),
-                Divider(
-                  height: 1,
-                  color: colors.outlineVariant.withValues(alpha: 0.45),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-                  child: ReviewSection(spot: spot),
-                ),
-              ],
+                  SpotImageCarousel(images: spot.imageUrls),
+                  SpotActionBar(
+                    isLiked: displayLiked,
+                    likesCount: displayLikesCount,
+                    isSaved: displaySaved,
+                    ratingAvg: spot.ratingAvg,
+                    ratingCount: spot.ratingCount,
+                    isLikeDisabled: isLikeProcessing,
+                    isSaveDisabled: _isTogglingSave,
+                    onLikeTap: () => _toggleLike(
+                      spot: spot,
+                      currentLiked: displayLiked,
+                      currentLikesCount: displayLikesCount,
+                    ),
+                    onCommentTap: () => _commentFocusNode.requestFocus(),
+                    onSaveTap: () => _toggleSave(
+                      spot: spot,
+                      currentSaved: displaySaved,
+                    ),
+                  ),
+                  SpotCoordinatesCard(
+                    tags: quickTags,
+                    latitude: spot.latitude,
+                    longitude: spot.longitude,
+                    onCopyCoordinates: () => _copyCoordinates(spot),
+                    onCopyMapsLink: () => _copyMapsLink(spot),
+                  ),
+                  Divider(
+                    height: 1,
+                    color: colors.outlineVariant.withValues(alpha: 0.45),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                    child: ReviewSection(spot: spot),
+                  ),
+                ],
+              ),
             ),
           ),
           ReviewInputBar(
             spot: spot,
             focusNode: _commentFocusNode,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionCounterButton extends StatelessWidget {
-  const _ActionCounterButton({
-    required this.icon,
-    required this.label,
-    this.activeColor,
-    this.isActive = false,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color? activeColor;
-  final bool isActive;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final foreground =
-        isActive ? (activeColor ?? colors.primary) : colors.onSurfaceVariant;
-    final background = isActive
-        ? (activeColor ?? colors.primary).withValues(alpha: 0.12)
-        : Colors.transparent;
-
-    return Material(
-      color: background,
-      borderRadius: BorderRadius.circular(20),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 19, color: foreground),
-              const SizedBox(width: 5),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                  color: foreground,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _QuickTagChip extends StatelessWidget {
-  const _QuickTagChip({
-    required this.icon,
-    required this.label,
-  });
-
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: colors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.55),
-          width: 0.8,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 14, color: colors.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w500,
-              color: colors.onSurface,
-              height: 1.2,
-            ),
           ),
         ],
       ),
