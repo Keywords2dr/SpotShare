@@ -4,8 +4,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../auth/presentation/auth_providers.dart';
+
 final spotDetailCurrentUserIdProvider = Provider<String?>((ref) {
-  return FirebaseAuth.instance.currentUser?.uid;
+  final authState = ref.watch(authStateProvider);
+  return authState.when(
+    data: (user) => user?.uid,
+    loading: () => FirebaseAuth.instance.currentUser?.uid,
+    error: (_, _) => FirebaseAuth.instance.currentUser?.uid,
+  );
 });
 
 enum SpotReportReason {
@@ -188,7 +195,10 @@ class FirestoreSpotReportRepository implements SpotReportGateway {
     required SpotReportReason reason,
     String note = '',
   }) async {
-    if (reporterId.trim().isEmpty) {
+    final liveUid = FirebaseAuth.instance.currentUser?.uid.trim() ?? '';
+    final effectiveReporterId = liveUid.isNotEmpty ? liveUid : reporterId.trim();
+
+    if (effectiveReporterId.isEmpty) {
       throw const SpotDetailException(
         'Vui lòng đăng nhập để gửi báo cáo vi phạm.',
         code: 'unauthenticated',
@@ -205,7 +215,7 @@ class FirestoreSpotReportRepository implements SpotReportGateway {
       await _db.collection('reports').add({
         'spotId': spotId.trim(),
         'spotTitle': spotTitle.trim(),
-        'reporterId': reporterId.trim(),
+        'reporterId': effectiveReporterId,
         'reasonCode': reason.code,
         'reasonLabel': reason.label,
         'note': note.trim(),

@@ -51,10 +51,10 @@ Future<void> main() async {
   }
 
   runApp(
-    DevicePreview(
-      enabled: !kReleaseMode && kIsWeb,
-      builder: (_) => const ProviderScope(
-        child: SpotShareApp(),
+    ProviderScope(
+      child: DevicePreview(
+        enabled: !kReleaseMode && kIsWeb,
+        builder: (_) => const SpotShareApp(),
       ),
     ),
   );

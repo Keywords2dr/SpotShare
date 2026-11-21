@@ -10,6 +10,18 @@ import 'package:spotshare/features/explore/presentation/explore_feed_controller.
 import 'package:spotshare/features/explore/presentation/explore_feed_screen.dart';
 import 'package:spotshare/features/explore/presentation/widgets/compact_explore_header.dart';
 
+class _TestExploreUidNotifier extends Notifier<String?> {
+  @override
+  String? build() => 'user_1';
+
+  void setUid(String? uid) => state = uid;
+}
+
+final _testExploreUidProvider =
+    NotifierProvider<_TestExploreUidNotifier, String?>(
+  _TestExploreUidNotifier.new,
+);
+
 class FakeExploreFeedGateway implements ExploreFeedGateway {
   FakeExploreFeedGateway({
     this.pages = const [],
@@ -28,7 +40,10 @@ class FakeExploreFeedGateway implements ExploreFeedGateway {
   Object? errorToThrow;
   Completer<void>? completer;
   int fetchCalls = 0;
+  int watchCalls = 0;
   final List<String> fetchedSpotIds = [];
+
+  bool get hasLiveListeners => _liveController.hasListener;
 
   void emitLiveHead(List<ExploreSpotSummary> items) {
     if (!_liveController.isClosed) {
@@ -42,6 +57,7 @@ class FakeExploreFeedGateway implements ExploreFeedGateway {
 
   @override
   Stream<List<ExploreSpotSummary>> watchLatestSpots({int limit = 12}) {
+    watchCalls++;
     return _liveController.stream;
   }
 
@@ -173,7 +189,8 @@ void main() {
       expect(ExploreFeedLogic.matchesQuery('da lat', spots[1]), isFalse);
     });
 
-    test('boosts freshly published and pending-timestamp spots in recommendations',
+    test(
+        'boosts freshly published and pending-timestamp spots in recommendations',
         () {
       final now = DateTime(2026, 11, 22, 1, 30);
       final spots = _sampleSpots(referenceTime: now);
@@ -273,6 +290,42 @@ void main() {
 
   group('ExploreFeedController unit tests', () {
     test(
+        'skips Firestore calls when signed out and cancels live stream immediately on sign-out',
+        () async {
+      final sample = _sampleSpots();
+      final gateway = FakeExploreFeedGateway(
+        pages: [ExploreFeedPage(items: sample, hasMore: false)],
+      );
+      addTearDown(gateway.dispose);
+
+      final container = ProviderContainer(
+        overrides: [
+          exploreFeedGatewayProvider.overrideWithValue(gateway),
+          exploreCurrentUserIdProvider.overrideWith(
+            (ref) => ref.watch(_testExploreUidProvider),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      container.read(_testExploreUidProvider.notifier).setUid(null);
+      await container.read(exploreFeedControllerProvider.notifier).loadInitial();
+      expect(gateway.fetchCalls, 0);
+      expect(gateway.watchCalls, 0);
+      expect(gateway.hasLiveListeners, isFalse);
+
+      container.read(_testExploreUidProvider.notifier).setUid('user_maianh');
+      await container.read(exploreFeedControllerProvider.notifier).loadInitial();
+      expect(gateway.fetchCalls, 1);
+      expect(gateway.watchCalls, 1);
+      expect(gateway.hasLiveListeners, isTrue);
+
+      container.read(_testExploreUidProvider.notifier).setUid(null);
+      container.read(exploreFeedControllerProvider);
+      expect(gateway.hasLiveListeners, isFalse);
+    });
+
+    test(
         'paginates, receives newly created spot in real time, and syncs updated/deleted spots',
         () async {
       final sample = _sampleSpots();
@@ -302,6 +355,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           exploreFeedGatewayProvider.overrideWithValue(gateway),
+          exploreCurrentUserIdProvider.overrideWithValue('user_1'),
         ],
       );
       addTearDown(container.dispose);
@@ -392,6 +446,7 @@ void main() {
         ProviderScope(
           overrides: [
             exploreFeedGatewayProvider.overrideWithValue(gateway),
+            exploreCurrentUserIdProvider.overrideWithValue('user_1'),
           ],
           child: MaterialApp(
             theme: CompactUiTheme.light(),
@@ -470,6 +525,7 @@ void main() {
         ProviderScope(
           overrides: [
             exploreFeedGatewayProvider.overrideWithValue(gateway),
+            exploreCurrentUserIdProvider.overrideWithValue('user_1'),
           ],
           child: MaterialApp(
             theme: CompactUiTheme.light(),
@@ -553,6 +609,7 @@ void main() {
         ProviderScope(
           overrides: [
             exploreFeedGatewayProvider.overrideWithValue(gateway),
+            exploreCurrentUserIdProvider.overrideWithValue('user_1'),
           ],
           child: MaterialApp(
             themeMode: ThemeMode.dark,

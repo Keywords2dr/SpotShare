@@ -246,9 +246,14 @@ abstract class LikedSpotsGateway {
 }
 
 class FirestoreLikedSpotsRepository implements LikedSpotsGateway {
-  FirestoreLikedSpotsRepository({this.firestore});
+  FirestoreLikedSpotsRepository({
+    this.firestore,
+    this.enableCollectionGroupFallback = false,
+  });
 
   final FirebaseFirestore? firestore;
+  final bool enableCollectionGroupFallback;
+  bool _collectionGroupIndexMissing = false;
 
   FirebaseFirestore get _db => firestore ?? FirebaseFirestore.instance;
 
@@ -282,7 +287,9 @@ class FirestoreLikedSpotsRepository implements LikedSpotsGateway {
       );
       collectedRecords.addAll(legacyUserRecords);
 
-      if (collectedRecords.isEmpty) {
+      if (collectedRecords.isEmpty &&
+          enableCollectionGroupFallback &&
+          !_collectionGroupIndexMissing) {
         final groupRecords = await _readCollectionGroupLikes(cleanUserId);
         collectedRecords.addAll(groupRecords);
       }
@@ -427,6 +434,16 @@ class FirestoreLikedSpotsRepository implements LikedSpotsGateway {
         );
       }
       return records;
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition') {
+        _collectionGroupIndexMissing = true;
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[LikedSpotsRepository] fallback collectionGroup(likes) skipped: $e',
+        );
+      }
+      return const [];
     } catch (e) {
       if (kDebugMode) {
         debugPrint(

@@ -7,6 +7,18 @@ import 'package:spotshare/features/spots/data/spot_like_repository.dart';
 import 'package:spotshare/features/spots/presentation/like/spot_like_button.dart';
 import 'package:spotshare/features/spots/presentation/like/spot_like_controller.dart';
 
+class _TestLikeAuthUidNotifier extends Notifier<String?> {
+  @override
+  String? build() => 'user_1';
+
+  void setUid(String? uid) => state = uid;
+}
+
+final _testLikeAuthUidProvider =
+    NotifierProvider<_TestLikeAuthUidNotifier, String?>(
+  _TestLikeAuthUidNotifier.new,
+);
+
 class FakeSpotLikeGateway implements SpotLikeGateway {
   FakeSpotLikeGateway({
     this.errorToThrow,
@@ -131,7 +143,7 @@ void main() {
 
   group('SpotLikeController unit tests', () {
     test(
-        'updates optimistically, blocks concurrent taps, and returns reached milestone',
+        'updates optimistically, blocks concurrent taps, returns milestone, and auto-clears on sign-out',
         () async {
       final completer = Completer<void>();
       final fakeGateway = FakeSpotLikeGateway(
@@ -142,6 +154,9 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           spotLikeGatewayProvider.overrideWithValue(fakeGateway),
+          spotLikeCurrentUserIdProvider.overrideWith(
+            (ref) => ref.watch(_testLikeAuthUidProvider),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -193,7 +208,7 @@ void main() {
       expect(committed?.likesCount, 10);
       expect(committed?.isProcessing, isFalse);
 
-      notifier.clearAll();
+      container.read(_testLikeAuthUidProvider.notifier).setUid(null);
       expect(container.read(spotLikeControllerProvider), isEmpty);
     });
 
@@ -210,6 +225,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           spotLikeGatewayProvider.overrideWithValue(fakeGateway),
+          spotLikeCurrentUserIdProvider.overrideWithValue('user_1'),
         ],
       );
       addTearDown(container.dispose);
@@ -242,6 +258,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           spotLikeGatewayProvider.overrideWithValue(fakeGateway),
+          spotLikeCurrentUserIdProvider.overrideWithValue('user_1'),
         ],
       );
       addTearDown(container.dispose);
@@ -274,6 +291,7 @@ void main() {
         ProviderScope(
           overrides: [
             spotLikeGatewayProvider.overrideWithValue(fakeGateway),
+            spotLikeCurrentUserIdProvider.overrideWithValue('user_1'),
           ],
           child: MaterialApp(
             home: Scaffold(
@@ -322,6 +340,7 @@ void main() {
         ProviderScope(
           overrides: [
             spotLikeGatewayProvider.overrideWithValue(fakeGateway),
+            spotLikeCurrentUserIdProvider.overrideWithValue(null),
           ],
           child: MaterialApp(
             themeMode: ThemeMode.dark,

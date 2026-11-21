@@ -18,21 +18,44 @@ import '../../features/spots/presentation/edit/edit_spot_screen.dart';
 import '../presentation/main_shell_screen.dart';
 
 class _RouterRefreshNotifier extends ChangeNotifier {
-  void notify() => notifyListeners();
+  bool _disposed = false;
+
+  void notify() {
+    if (_disposed) return;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
 }
 
 final appRouterProvider = Provider<GoRouter>((ref) {
   final refreshNotifier = _RouterRefreshNotifier();
-  ref.listen<AsyncValue<User?>>(authStateProvider, (_, _) {
-    refreshNotifier.notify();
-  });
-  ref.onDispose(refreshNotifier.dispose);
+  String? lastAuthUid = FirebaseAuth.instance.currentUser?.uid;
 
-  return GoRouter(
+  ref.listen<AsyncValue<User?>>(authStateProvider, (_, next) {
+    if (next.isLoading) return;
+    final nextUid = next.value?.uid;
+    if (nextUid != lastAuthUid) {
+      lastAuthUid = nextUid;
+      refreshNotifier.notify();
+    }
+  });
+
+  final router = GoRouter(
     initialLocation: '/explore',
     refreshListenable: refreshNotifier,
     redirect: (context, state) {
-      final isLoggedIn = FirebaseAuth.instance.currentUser != null;
+      final authAsync = ref.read(authStateProvider);
+      final currentUser = authAsync.when(
+        data: (user) => user,
+        loading: () => FirebaseAuth.instance.currentUser,
+        error: (_, _) => FirebaseAuth.instance.currentUser,
+      );
+      final isLoggedIn = currentUser != null;
       final path = state.uri.path;
       final isAuthRoute = path == '/login' ||
           path == '/register' ||
@@ -144,4 +167,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+
+  ref.onDispose(() {
+    router.dispose();
+    refreshNotifier.dispose();
+  });
+
+  return router;
 });

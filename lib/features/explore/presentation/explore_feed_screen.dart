@@ -17,13 +17,11 @@ class ExploreFeedScreen extends ConsumerStatefulWidget {
     super.key,
     this.onSpotTap,
     this.onUserTap,
-    this.onMapTap,
     this.onCreateTap,
   });
 
   final FutureOr<void> Function(ExploreSpotSummary spot)? onSpotTap;
   final void Function(ExploreUserHit user)? onUserTap;
-  final VoidCallback? onMapTap;
   final VoidCallback? onCreateTap;
 
   @override
@@ -41,7 +39,10 @@ class _ExploreFeedScreenState extends ConsumerState<ExploreFeedScreen> {
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ref.read(exploreFeedControllerProvider.notifier).loadInitial();
+      final uid = ref.read(exploreCurrentUserIdProvider)?.trim() ?? '';
+      if (uid.isNotEmpty) {
+        ref.read(exploreFeedControllerProvider.notifier).loadInitial();
+      }
     });
   }
 
@@ -99,20 +100,6 @@ class _ExploreFeedScreenState extends ConsumerState<ExploreFeedScreen> {
         );
   }
 
-  void _openMap() {
-    if (widget.onMapTap != null) {
-      widget.onMapTap!();
-      return;
-    }
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      const SnackBar(
-        content: Text('Màn hình Bản đồ tương tác sẽ được mở ở bước tiếp theo.'),
-      ),
-    );
-  }
-
   Future<void> _openSpot(ExploreSpotSummary spot) async {
     if (widget.onSpotTap != null) {
       await widget.onSpotTap!(spot);
@@ -163,6 +150,17 @@ class _ExploreFeedScreenState extends ConsumerState<ExploreFeedScreen> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<String?>(exploreCurrentUserIdProvider, (previous, next) {
+      final nextUid = (next ?? '').trim();
+      final prevUid = (previous ?? '').trim();
+      if (nextUid.isNotEmpty && nextUid != prevUid) {
+        Future<void>.microtask(() {
+          if (!mounted) return;
+          ref.read(exploreFeedControllerProvider.notifier).loadInitial();
+        });
+      }
+    });
+
     final state = ref.watch(exploreFeedControllerProvider);
     final likeOverrides = ref.watch(spotLikeControllerProvider);
     final visibleSpots = state.visibleSpots;
@@ -185,7 +183,6 @@ class _ExploreFeedScreenState extends ConsumerState<ExploreFeedScreen> {
                       ),
               activeFilterCount: state.activeFilterCount,
               onFilterTap: _openFilterSheet,
-              onMapTap: _openMap,
             ),
             Divider(
               height: 0.6,

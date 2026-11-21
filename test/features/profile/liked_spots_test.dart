@@ -10,6 +10,18 @@ import 'package:spotshare/features/profile/presentation/widgets/liked_spots_tab.
 import 'package:spotshare/features/spots/data/spot_like_repository.dart';
 import 'package:spotshare/features/spots/presentation/like/spot_like_controller.dart';
 
+class _TestLikedAuthUidNotifier extends Notifier<String?> {
+  @override
+  String? build() => 'user_teo';
+
+  void setUid(String? uid) => state = uid;
+}
+
+final _testLikedAuthUidProvider =
+    NotifierProvider<_TestLikedAuthUidNotifier, String?>(
+  _TestLikedAuthUidNotifier.new,
+);
+
 class FakeLikedSpotsGateway implements LikedSpotsGateway {
   FakeLikedSpotsGateway({
     this.items = const [],
@@ -116,6 +128,12 @@ void main() {
       expect(orphans.map((e) => e.spotId).toList(), ['spot_deleted']);
     });
 
+    test('defaults collectionGroup fallback to disabled to prevent failed-precondition spam',
+        () {
+      final repo = FirestoreLikedSpotsRepository();
+      expect(repo.enableCollectionGroupFallback, isFalse);
+    });
+
     test('maps permission-denied to friendly Vietnamese without raw codes', () {
       final err = FirebaseException(
         plugin: 'cloud_firestore',
@@ -129,7 +147,8 @@ void main() {
   });
 
   group('LikedSpotsController unit tests', () {
-    test('loads liked spots, removes optimistically on unlike, and rolls back on failure',
+    test(
+        'loads liked spots, removes optimistically on unlike, rolls back on failure, and auto-clears on sign-out',
         () async {
       const sampleItem = LikedSpotItem(
         id: 'spot_kyaru',
@@ -150,6 +169,12 @@ void main() {
         overrides: [
           likedSpotsGatewayProvider.overrideWithValue(fakeLikedGateway),
           spotLikeGatewayProvider.overrideWithValue(fakeLikeGateway),
+          likedSpotsCurrentUserIdProvider.overrideWith(
+            (ref) => ref.watch(_testLikedAuthUidProvider),
+          ),
+          spotLikeCurrentUserIdProvider.overrideWith(
+            (ref) => ref.watch(_testLikedAuthUidProvider),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -172,19 +197,35 @@ void main() {
       expect(rollbackErr, contains('Mất kết nối mạng'));
       expect(controller.stateFor('user_teo').items.length, 1);
 
+      container.read(_testLikedAuthUidProvider.notifier).setUid(null);
+      expect(container.read(likedSpotsControllerProvider), isEmpty);
+
+      container.read(_testLikedAuthUidProvider.notifier).setUid('user_teo');
+      await container
+          .read(likedSpotsControllerProvider.notifier)
+          .load(userId: 'user_teo');
       fakeLikeGateway.errorToThrow = null;
-      final successErr = await controller.unlikeSpot(
-        userId: 'user_teo',
-        item: sampleItem,
-      );
+      final successErr = await container
+          .read(likedSpotsControllerProvider.notifier)
+          .unlikeSpot(
+            userId: 'user_teo',
+            item: sampleItem,
+          );
       expect(successErr, isNull);
-      expect(controller.stateFor('user_teo').items, isEmpty);
+      expect(
+        container
+            .read(likedSpotsControllerProvider.notifier)
+            .stateFor('user_teo')
+            .items,
+        isEmpty,
+      );
       expect(fakeLikeGateway.toggledSpotIds, ['spot_kyaru', 'spot_kyaru']);
     });
   });
 
   group('LikedSpotsTab widget tests', () {
-    testWidgets('shows loading grid, then error state with retry into success grid',
+    testWidgets(
+        'shows loading grid, then error state with retry into success grid',
         (tester) async {
       final completer = Completer<void>();
       final fakeLikedGateway = FakeLikedSpotsGateway(
@@ -202,6 +243,8 @@ void main() {
           overrides: [
             likedSpotsGatewayProvider.overrideWithValue(fakeLikedGateway),
             spotLikeGatewayProvider.overrideWithValue(fakeLikeGateway),
+            likedSpotsCurrentUserIdProvider.overrideWithValue('user_teo'),
+            spotLikeCurrentUserIdProvider.overrideWithValue('user_teo'),
           ],
           child: MaterialApp(
             home: Scaffold(
@@ -266,6 +309,7 @@ void main() {
         ProviderScope(
           overrides: [
             likedSpotsGatewayProvider.overrideWithValue(fakeLikedGateway),
+            likedSpotsCurrentUserIdProvider.overrideWithValue('user_teo'),
           ],
           child: MaterialApp(
             themeMode: ThemeMode.dark,

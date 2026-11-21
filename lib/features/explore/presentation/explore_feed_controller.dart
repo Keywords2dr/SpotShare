@@ -1,10 +1,21 @@
 import 'dart:async';
 
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../auth/presentation/auth_providers.dart';
 import '../data/explore_feed_repository.dart';
 import 'widgets/compact_explore_header.dart';
+
+final exploreCurrentUserIdProvider = Provider<String?>((ref) {
+  final authState = ref.watch(authStateProvider);
+  return authState.when(
+    data: (user) => user?.uid,
+    loading: () => FirebaseAuth.instance.currentUser?.uid,
+    error: (_, _) => FirebaseAuth.instance.currentUser?.uid,
+  );
+});
 
 final exploreFeedGatewayProvider = Provider<ExploreFeedGateway>((ref) {
   return FirestoreExploreFeedRepository();
@@ -160,9 +171,22 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
   List<ExploreSpotSummary> _olderSpots = const [];
   bool _hasReceivedLiveHead = false;
   int _userSearchSeq = 0;
+  String _activeUserId = '';
+
+  bool get _hasActiveSession => _activeUserId.isNotEmpty;
 
   @override
   ExploreFeedState build() {
+    final uid = ref.watch(exploreCurrentUserIdProvider);
+    _activeUserId = (uid ?? '').trim();
+
+    _liveSub?.cancel();
+    _liveSub = null;
+    _liveHeadSpots = const [];
+    _olderSpots = const [];
+    _hasReceivedLiveHead = false;
+    _userSearchSeq++;
+
     ref.onDispose(() {
       _liveSub?.cancel();
       _liveSub = null;
@@ -171,7 +195,14 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
   }
 
   void _ensureLiveSubscription({bool forceRestart = false}) {
+    if (!_hasActiveSession) {
+      _liveSub?.cancel();
+      _liveSub = null;
+      return;
+    }
     if (_liveSub != null && !forceRestart) return;
+
+    final sessionUid = _activeUserId;
     _liveSub?.cancel();
     _hasReceivedLiveHead = false;
 
@@ -180,6 +211,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
         .watchLatestSpots(limit: pageSize)
         .listen(
       (headItems) {
+        if (_activeUserId != sessionUid) return;
         _hasReceivedLiveHead = true;
         _liveHeadSpots = headItems;
         final merged = ExploreFeedLogic.mergeHeadAndOlder(
@@ -195,6 +227,19 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
         );
       },
       onError: (Object error) {
+        if (_activeUserId != sessionUid || !_hasActiveSession) {
+          _liveSub?.cancel();
+          _liveSub = null;
+          return;
+        }
+        final isTransientAuthLoss =
+            error.toString().toLowerCase().contains('permission-denied') &&
+                !_isFirebaseSignedIn();
+        if (isTransientAuthLoss) {
+          _liveSub?.cancel();
+          _liveSub = null;
+          return;
+        }
         if (kDebugMode) {
           debugPrint('[ExploreFeedController] watchLatestSpots error: $error');
         }
@@ -202,13 +247,23 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
     );
   }
 
+  bool _isFirebaseSignedIn() {
+    try {
+      return FirebaseAuth.instance.currentUser != null;
+    } catch (_) {
+      return _hasActiveSession;
+    }
+  }
+
   Future<void> loadInitial({bool force = false}) async {
+    if (!_hasActiveSession) return;
     if (state.isInitialLoading) return;
     if (state.hasLoaded && !force && state.errorMessage == null) {
       _ensureLiveSubscription();
       return;
     }
 
+    final sessionUid = _activeUserId;
     if (force) {
       _olderSpots = const [];
     }
@@ -224,6 +279,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
       final page = await ref
           .read(exploreFeedGatewayProvider)
           .fetchPage(limit: pageSize);
+      if (_activeUserId != sessionUid) return;
 
       if (!_hasReceivedLiveHead || _liveHeadSpots.isEmpty) {
         _liveHeadSpots = page.items;
@@ -244,6 +300,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
         clearError: true,
       );
     } catch (e) {
+      if (_activeUserId != sessionUid) return;
       state = state.copyWith(
         isInitialLoading: false,
         isRefreshing: false,
@@ -256,12 +313,16 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
   Future<void> refresh() => loadInitial(force: true);
 
   Future<void> syncSpotById(String spotId) async {
+    if (!_hasActiveSession) return;
     final cleanId = spotId.trim();
     if (cleanId.isEmpty) return;
+    final sessionUid = _activeUserId;
 
     try {
       final latest =
           await ref.read(exploreFeedGatewayProvider).fetchSpotById(cleanId);
+      if (_activeUserId != sessionUid) return;
+
       if (latest == null) {
         _liveHeadSpots =
             _liveHeadSpots.where((s) => s.id != cleanId).toList();
@@ -306,6 +367,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
   }
 
   Future<void> loadMore() async {
+    if (!_hasActiveSession) return;
     if (state.isInitialLoading ||
         state.isRefreshing ||
         state.isLoadingMore ||
@@ -313,6 +375,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
       return;
     }
 
+    final sessionUid = _activeUserId;
     state = state.copyWith(isLoadingMore: true, clearError: true);
 
     try {
@@ -320,6 +383,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
             limit: pageSize,
             cursor: state.nextCursor,
           );
+      if (_activeUserId != sessionUid) return;
 
       _olderSpots = ExploreFeedLogic.mergeHeadAndOlder(
         head: _olderSpots,
@@ -338,6 +402,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
         clearError: true,
       );
     } catch (e) {
+      if (_activeUserId != sessionUid) return;
       state = state.copyWith(
         isLoadingMore: false,
         errorMessage: ExploreFeedErrorMapper.map(e),
@@ -398,7 +463,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
     final isHandle = ExploreFeedLogic.isHandleQuery(query);
     final handle = ExploreFeedLogic.extractHandle(query);
 
-    if (!isHandle || handle.isEmpty) {
+    if (!isHandle || handle.isEmpty || !_hasActiveSession) {
       _userSearchSeq++;
       state = state.copyWith(
         searchQuery: query,
@@ -409,6 +474,7 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
     }
 
     final seq = ++_userSearchSeq;
+    final sessionUid = _activeUserId;
     state = state.copyWith(
       searchQuery: query,
       isSearchingUsers: true,
@@ -418,13 +484,13 @@ class ExploreFeedController extends Notifier<ExploreFeedState> {
       final users = await ref
           .read(exploreFeedGatewayProvider)
           .searchUsersByHandle(handle);
-      if (seq != _userSearchSeq) return;
+      if (seq != _userSearchSeq || _activeUserId != sessionUid) return;
       state = state.copyWith(
         matchedUsers: users,
         isSearchingUsers: false,
       );
     } catch (_) {
-      if (seq != _userSearchSeq) return;
+      if (seq != _userSearchSeq || _activeUserId != sessionUid) return;
       state = state.copyWith(
         matchedUsers: const [],
         isSearchingUsers: false,

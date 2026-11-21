@@ -1,9 +1,24 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../auth/presentation/auth_providers.dart';
 import '../../spots/presentation/like/spot_like_controller.dart';
 import '../data/liked_spots_repository.dart';
 
 typedef LikedSpotsStateByUser = Map<String, LikedSpotsViewState>;
+
+final likedSpotsCurrentUserIdProvider = Provider<String?>((ref) {
+  if (Firebase.apps.isEmpty) {
+    return null;
+  }
+  final authState = ref.watch(authStateProvider);
+  return authState.when(
+    data: (user) => user?.uid,
+    loading: () => FirebaseAuth.instance.currentUser?.uid,
+    error: (_, _) => FirebaseAuth.instance.currentUser?.uid,
+  );
+});
 
 final likedSpotsGatewayProvider = Provider<LikedSpotsGateway>((ref) {
   return FirestoreLikedSpotsRepository();
@@ -25,7 +40,8 @@ class LikedSpotsViewState {
   final Set<String> removingSpotIds;
 
   bool get isInitialLoading => isLoading && !hasLoaded;
-  bool get isEmpty => hasLoaded && !isLoading && errorMessage == null && items.isEmpty;
+  bool get isEmpty =>
+      hasLoaded && !isLoading && errorMessage == null && items.isEmpty;
 
   LikedSpotsViewState copyWith({
     List<LikedSpotItem>? items,
@@ -46,8 +62,11 @@ class LikedSpotsViewState {
 }
 
 class LikedSpotsController extends Notifier<LikedSpotsStateByUser> {
+  String _activeAuthUid = '';
+
   @override
   LikedSpotsStateByUser build() {
+    _activeAuthUid = (ref.watch(likedSpotsCurrentUserIdProvider) ?? '').trim();
     return const {};
   }
 
@@ -64,6 +83,9 @@ class LikedSpotsController extends Notifier<LikedSpotsStateByUser> {
     if (cleanUserId.isEmpty) {
       return;
     }
+    if (Firebase.apps.isNotEmpty && _activeAuthUid.isEmpty) {
+      return;
+    }
 
     final current = stateFor(cleanUserId);
     if (current.isLoading) {
@@ -73,6 +95,7 @@ class LikedSpotsController extends Notifier<LikedSpotsStateByUser> {
       return;
     }
 
+    final sessionUid = _activeAuthUid;
     state = {
       ...state,
       cleanUserId: current.copyWith(
@@ -86,6 +109,7 @@ class LikedSpotsController extends Notifier<LikedSpotsStateByUser> {
             userId: cleanUserId,
             cleanupOrphans: cleanupOrphans,
           );
+      if (_activeAuthUid != sessionUid) return;
       state = {
         ...state,
         cleanUserId: current.copyWith(
@@ -97,6 +121,7 @@ class LikedSpotsController extends Notifier<LikedSpotsStateByUser> {
         ),
       };
     } catch (e) {
+      if (_activeAuthUid != sessionUid) return;
       final message = LikedSpotsErrorMapper.map(e);
       state = {
         ...state,
@@ -123,6 +148,7 @@ class LikedSpotsController extends Notifier<LikedSpotsStateByUser> {
       return null;
     }
 
+    final sessionUid = _activeAuthUid;
     final previousItems = List<LikedSpotItem>.from(current.items);
     final nextItems =
         previousItems.where((entry) => entry.id != item.id).toList();
@@ -144,6 +170,8 @@ class LikedSpotsController extends Notifier<LikedSpotsStateByUser> {
               fallbackLikesCount: item.likesCount,
               authorId: item.authorId,
             );
+
+    if (_activeAuthUid != sessionUid) return null;
 
     final latest = stateFor(cleanUserId);
     final clearedRemoving = Set<String>.from(latest.removingSpotIds)

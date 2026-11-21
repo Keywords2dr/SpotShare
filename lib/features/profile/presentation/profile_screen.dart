@@ -9,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/services/service_providers.dart';
 import '../../../core/utils/cloudinary_url_helper.dart';
 import '../../auth/presentation/auth_providers.dart';
-import '../../spots/presentation/like/spot_like_controller.dart';
 import '../domain/user_profile_model.dart';
 import 'liked_spots_controller.dart';
 import 'profile_providers.dart';
@@ -19,9 +18,13 @@ import 'widgets/profile_spots_grid.dart';
 
 final profileUserDataStreamProvider =
     StreamProvider.autoDispose.family<ProfileDataMap, String>((ref, userId) {
+  final cleanId = userId.trim();
+  if (cleanId.isEmpty) {
+    return Stream<ProfileDataMap>.value(const <String, dynamic>{});
+  }
   return ref
       .watch(profileRepositoryProvider)
-      .watchUserData(userId)
+      .watchUserData(cleanId)
       .map<ProfileDataMap>((Object? raw) {
     if (raw is Map<String, dynamic>) {
       return raw;
@@ -68,7 +71,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _pickAndUploadAvatar(User authUser) async {
-    if (_isUploadingAvatar) return;
+    if (_isUploadingAvatar || _isSigningOut) return;
 
     ProfileAvatarSourceOption? chosenSource;
     if (kIsWeb) {
@@ -137,6 +140,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   void _refreshProfile(String userId) {
+    if (_isSigningOut) return;
     ref.invalidate(profileUserDataStreamProvider(userId));
     ref.invalidate(userSpotsProvider(userId));
     ref.invalidate(savedSpotsProvider(userId));
@@ -157,9 +161,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     if (confirmed != true || !mounted) return;
 
     setState(() => _isSigningOut = true);
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+
     try {
-      ref.read(spotLikeControllerProvider.notifier).clearAll();
-      ref.read(likedSpotsControllerProvider.notifier).clearAll();
       await ref.read(authControllerProvider.notifier).signOut();
     } catch (e) {
       if (kDebugMode) {
@@ -178,7 +183,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final authUser = FirebaseAuth.instance.currentUser;
+    final authAsync = ref.watch(authStateProvider);
+    final authUser = authAsync.when(
+      data: (user) => user,
+      loading: () => FirebaseAuth.instance.currentUser,
+      error: (_, _) => FirebaseAuth.instance.currentUser,
+    );
+
     if (authUser == null) {
       return ProfileGuestView(
         onLoginTap: () => context.go('/login'),
@@ -218,31 +229,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
-            onPressed: () => context.push('/profile/edit'),
+            onPressed:
+                _isSigningOut ? null : () => context.push('/profile/edit'),
             tooltip: 'Sửa hồ sơ',
             icon: const Icon(Icons.edit_outlined),
           ),
           actions: [
             IconButton(
-              onPressed: () => _refreshProfile(authUser.uid),
+              onPressed:
+                  _isSigningOut ? null : () => _refreshProfile(authUser.uid),
               tooltip: 'Làm mới hồ sơ',
               icon: const Icon(Icons.refresh_rounded),
             ),
-            if (_isSigningOut)
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 14),
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              )
-            else
-              IconButton(
-                onPressed: _confirmAndSignOut,
-                tooltip: 'Đăng xuất',
-                icon: const Icon(Icons.logout_rounded),
-              ),
+            IconButton(
+              onPressed: _isSigningOut ? null : _confirmAndSignOut,
+              tooltip: 'Đăng xuất',
+              icon: const Icon(Icons.logout_rounded),
+            ),
           ],
         ),
         body: NestedScrollView(

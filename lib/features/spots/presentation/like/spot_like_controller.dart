@@ -1,9 +1,24 @@
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../auth/presentation/auth_providers.dart';
 import '../../data/spot_like_repository.dart';
 
 typedef SpotLikeStateMap = Map<String, SpotLikeViewState>;
 typedef SpotLikeQuery = ({String spotId, String userId});
+
+final spotLikeCurrentUserIdProvider = Provider<String?>((ref) {
+  if (Firebase.apps.isEmpty) {
+    return null;
+  }
+  final authState = ref.watch(authStateProvider);
+  return authState.when(
+    data: (user) => user?.uid,
+    loading: () => FirebaseAuth.instance.currentUser?.uid,
+    error: (_, _) => FirebaseAuth.instance.currentUser?.uid,
+  );
+});
 
 final spotLikeGatewayProvider = Provider<SpotLikeGateway>((ref) {
   return FirestoreSpotLikeRepository();
@@ -59,8 +74,11 @@ class SpotLikeActionOutcome {
 }
 
 class SpotLikeController extends Notifier<SpotLikeStateMap> {
+  String _activeAuthUid = '';
+
   @override
   SpotLikeStateMap build() {
+    _activeAuthUid = (ref.watch(spotLikeCurrentUserIdProvider) ?? '').trim();
     return const {};
   }
 
@@ -114,6 +132,7 @@ class SpotLikeController extends Notifier<SpotLikeStateMap> {
       return const SpotLikeActionOutcome(success: false, ignored: true);
     }
 
+    final sessionUid = _activeAuthUid;
     final nextIsLiked = !current.isLiked;
     final optimisticCount = SpotLikeLogic.computeNextCount(
       currentCount: current.likesCount,
@@ -136,6 +155,10 @@ class SpotLikeController extends Notifier<SpotLikeStateMap> {
             authorId: authorId,
           );
 
+      if (_activeAuthUid != sessionUid) {
+        return const SpotLikeActionOutcome(success: false, ignored: true);
+      }
+
       state = {
         ...state,
         spotId: SpotLikeViewState(
@@ -150,6 +173,9 @@ class SpotLikeController extends Notifier<SpotLikeStateMap> {
         reachedMilestone: result.reachedMilestone,
       );
     } catch (e) {
+      if (_activeAuthUid != sessionUid) {
+        return const SpotLikeActionOutcome(success: false, ignored: true);
+      }
       state = {
         ...state,
         spotId: current.copyWith(isProcessing: false),
