@@ -88,7 +88,7 @@ class ReviewCard extends ConsumerWidget {
                         'Tác giả',
                         style: TextStyle(
                           fontSize: 11,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w700,
                           color: colors.onPrimaryContainer,
                         ),
                       ),
@@ -126,32 +126,52 @@ class ReviewCard extends ConsumerWidget {
                     '${review.rating}/5',
                     style: TextStyle(
                       fontSize: 12,
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w600,
                       color: colors.onSurfaceVariant,
                     ),
                   ),
                   if (canDelete) ...[
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 14),
                     isDeleting
                         ? const SizedBox(
                             width: 14,
                             height: 14,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : InkWell(
-                            onTap: onDelete,
-                            borderRadius: BorderRadius.circular(4),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
+                        : Material(
+                            color: colors.errorContainer.withValues(alpha: 0.55),
+                            shape: StadiumBorder(
+                              side: BorderSide(
+                                color: colors.error.withValues(alpha: 0.4),
+                                width: 0.8,
                               ),
-                              child: Text(
-                                'Xóa',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: colors.error,
+                            ),
+                            clipBehavior: Clip.antiAlias,
+                            child: InkWell(
+                              onTap: onDelete,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2.5,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 13,
+                                      color: colors.error,
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      'Xóa',
+                                      style: TextStyle(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: colors.error,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),

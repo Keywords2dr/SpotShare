@@ -7,6 +7,8 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/services/place_search_service.dart';
 import '../../../../core/services/service_providers.dart';
+import '../../domain/spot_tag_presets.dart';
+import '../widgets/spot_tag_selector.dart';
 import 'create_spot_controller.dart';
 
 class CreateSpotScreen extends ConsumerStatefulWidget {
@@ -17,33 +19,6 @@ class CreateSpotScreen extends ConsumerStatefulWidget {
 }
 
 class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
-  static const List<String> _categories = [
-    'Bãi biển',
-    'Cảnh đẹp / Check-in',
-    'Món ăn ngon',
-    'Quán cà phê view đẹp',
-  ];
-
-  static const List<String> _bestTimeOptions = [
-    'Sáng sớm (5h–8h)',
-    'Chiều hoàng hôn (16h–18h)',
-    'Buổi tối / Đêm',
-    'Cả ngày',
-  ];
-
-  static const List<String> _difficultyOptions = [
-    'Dễ đi / Ô tô tới nơi',
-    'Xe máy / Đường đèo nhẹ',
-    'Đi bộ / Trekking ngắn',
-  ];
-
-  static const List<String> _priceOptions = [
-    'Miễn phí',
-    '< 50k',
-    '50k – 150k',
-    '> 150k',
-  ];
-
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
@@ -61,10 +36,10 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
   double? _selectedLat;
   double? _selectedLng;
 
-  String _selectedCategory = _categories.first;
-  String _selectedBestTime = _bestTimeOptions.first;
-  String _selectedDifficulty = _difficultyOptions.first;
-  String _selectedPrice = _priceOptions[2];
+  String _selectedCategory = SpotTagPresets.defaultCategories.first;
+  String _selectedBestTime = '';
+  String _selectedDifficulty = '';
+  String _selectedPrice = '';
 
   @override
   void dispose() {
@@ -192,6 +167,13 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
       return;
     }
 
+    if (_selectedCategory.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng chọn hoặc nhập danh mục.')),
+      );
+      return;
+    }
+
     if (_selectedLat == null ||
         _selectedLng == null ||
         _selectedAddress.isEmpty) {
@@ -226,45 +208,16 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
       _clearSelectedPlace();
       setState(() {
         _selectedImages.clear();
+        _selectedCategory = SpotTagPresets.defaultCategories.first;
+        _selectedBestTime = '';
+        _selectedDifficulty = '';
+        _selectedPrice = '';
       });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Đăng địa điểm thành công!')),
       );
       context.go('/explore');
     }
-  }
-
-  Widget _buildChoiceSection({
-    required String label,
-    required List<String> options,
-    required String selectedValue,
-    required ValueChanged<String> onSelected,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: options.map((option) {
-            final isSelected = option == selectedValue;
-            return ChoiceChip(
-              label: Text(option),
-              selected: isSelected,
-              onSelected: (_) => onSelected(option),
-            );
-          }).toList(),
-        ),
-      ],
-    );
   }
 
   @override
@@ -285,6 +238,7 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
     final uploadState = asyncState.value ?? const CreateSpotUploadState();
     final isBusy = asyncState.isLoading || uploadState.isSubmitting;
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
 
     return Scaffold(
       appBar: AppBar(
@@ -298,16 +252,40 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Hình ảnh (${_selectedImages.length}/6)',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                Text.rich(
+                  TextSpan(
+                    text: 'Hình ảnh (${_selectedImages.length}/6) ',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: '*',
+                        style: TextStyle(
+                          color: colors.error,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                TextButton.icon(
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                  ),
                   onPressed: isBusy ? null : _pickImages,
-                  icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: const Text('Chọn ảnh'),
+                  icon: const Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: 18,
+                  ),
+                  label: const Text(
+                    'Chọn ảnh',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
               ],
             ),
@@ -329,21 +307,24 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: theme.colorScheme.outlineVariant,
+                            color: colors.primary.withValues(alpha: 0.45),
                           ),
-                          color: theme.colorScheme.surfaceContainerLow,
+                          color: colors.primaryContainer.withValues(alpha: 0.25),
                         ),
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Icon(
                               Icons.add_a_photo_outlined,
-                              color: theme.colorScheme.primary,
+                              color: colors.primary,
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Thêm ảnh',
-                              style: theme.textTheme.bodySmall,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.primary,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ],
                         ),
@@ -364,7 +345,7 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                           errorBuilder: (_, _, _) => Container(
                             width: 108,
                             height: 108,
-                            color: theme.colorScheme.surfaceContainerHighest,
+                            color: colors.surfaceContainerHighest,
                             alignment: Alignment.center,
                             padding: const EdgeInsets.all(6),
                             child: Text(
@@ -383,15 +364,20 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                           right: 4,
                           child: InkWell(
                             onTap: () => _removeImage(index),
+                            borderRadius: BorderRadius.circular(12),
                             child: Container(
-                              decoration: const BoxDecoration(
-                                color: Colors.black54,
+                              decoration: BoxDecoration(
+                                color: colors.error,
                                 shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
                               ),
                               padding: const EdgeInsets.all(4),
                               child: const Icon(
-                                Icons.close,
-                                size: 16,
+                                Icons.close_rounded,
+                                size: 14,
                                 color: Colors.white,
                               ),
                             ),
@@ -415,7 +401,7 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                             ? uploadState.statusMessage
                             : 'Đang xử lý...',
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -450,7 +436,11 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                     : (_placeSearchController.text.isNotEmpty
                         ? IconButton(
                             onPressed: isBusy ? null : _clearSelectedPlace,
-                            icon: const Icon(Icons.clear),
+                            tooltip: 'Xóa địa chỉ',
+                            icon: Icon(
+                              Icons.cancel_rounded,
+                              color: colors.error,
+                            ),
                           )
                         : null),
               ),
@@ -460,7 +450,8 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
               Text(
                 _placeError!,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.error,
+                  color: colors.error,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -480,7 +471,7 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                       dense: true,
                       leading: Icon(
                         Icons.location_on_outlined,
-                        color: theme.colorScheme.primary,
+                        color: colors.primary,
                       ),
                       title: Text(
                         item.mainText,
@@ -505,11 +496,10 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color:
-                      theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+                  color: colors.primaryContainer.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                    color: colors.primary.withValues(alpha: 0.4),
                   ),
                 ),
                 child: Row(
@@ -517,7 +507,7 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                   children: [
                     Icon(
                       Icons.check_circle_outline,
-                      color: theme.colorScheme.primary,
+                      color: colors.primary,
                       size: 20,
                     ),
                     const SizedBox(width: 10),
@@ -533,14 +523,44 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'GPS: ${_selectedLat!.toStringAsFixed(5)}, ${_selectedLng!.toStringAsFixed(5)}',
+                            'Tọa độ: ${_selectedLat!.toStringAsFixed(5)}, ${_selectedLng!.toStringAsFixed(5)}',
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                              color: colors.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
                     ),
+                    if (!isBusy) ...[
+                      const SizedBox(width: 8),
+                      Material(
+                        color: colors.errorContainer.withValues(alpha: 0.7),
+                        shape: StadiumBorder(
+                          side: BorderSide(
+                            color: colors.error.withValues(alpha: 0.45),
+                            width: 0.8,
+                          ),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: _clearSelectedPlace,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
+                            child: Text(
+                              'Xóa',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: colors.error,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -562,16 +582,13 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                 return null;
               },
             ),
-            const SizedBox(height: 16),
-            _buildChoiceSection(
-              label: 'Danh mục chính *',
-              options: _categories,
-              selectedValue: _selectedCategory,
-              onSelected: isBusy
-                  ? (_) {}
-                  : (value) => setState(() => _selectedCategory = value),
+            const SizedBox(height: 18),
+            SpotCategorySelector(
+              selectedCategory: _selectedCategory,
+              enabled: !isBusy,
+              onChanged: (value) => setState(() => _selectedCategory = value),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             TextFormField(
               controller: _descriptionController,
               enabled: !isBusy,
@@ -589,34 +606,23 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
               },
             ),
             const SizedBox(height: 18),
-            _buildChoiceSection(
-              label: 'Quick Tag — Giờ đẹp nhất',
-              options: _bestTimeOptions,
-              selectedValue: _selectedBestTime,
-              onSelected: isBusy
-                  ? (_) {}
-                  : (value) => setState(() => _selectedBestTime = value),
-            ),
-            const SizedBox(height: 16),
-            _buildChoiceSection(
-              label: 'Quick Tag — Đường đi',
-              options: _difficultyOptions,
-              selectedValue: _selectedDifficulty,
-              onSelected: isBusy
-                  ? (_) {}
-                  : (value) => setState(() => _selectedDifficulty = value),
-            ),
-            const SizedBox(height: 16),
-            _buildChoiceSection(
-              label: 'Quick Tag — Khoảng giá tham khảo',
-              options: _priceOptions,
-              selectedValue: _selectedPrice,
-              onSelected: isBusy
-                  ? (_) {}
-                  : (value) => setState(() => _selectedPrice = value),
+            SpotQuickTagsSelector(
+              category: _selectedCategory,
+              bestTimeTag: _selectedBestTime,
+              difficultyTag: _selectedDifficulty,
+              priceTag: _selectedPrice,
+              enabled: !isBusy,
+              onBestTimeChanged: (value) =>
+                  setState(() => _selectedBestTime = value),
+              onDifficultyChanged: (value) =>
+                  setState(() => _selectedDifficulty = value),
+              onPriceChanged: (value) => setState(() => _selectedPrice = value),
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
               onPressed: isBusy ? null : _submit,
               icon: isBusy
                   ? const SizedBox(
@@ -625,7 +631,13 @@ class _CreateSpotScreenState extends ConsumerState<CreateSpotScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.cloud_upload_outlined),
-              label: Text(isBusy ? 'Đang đăng địa điểm...' : 'Đăng địa điểm'),
+              label: Text(
+                isBusy ? 'Đang đăng địa điểm...' : 'Đăng địa điểm',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
           ],

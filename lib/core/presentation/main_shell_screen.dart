@@ -9,7 +9,7 @@ class MainShellScreen extends StatelessWidget {
 
   final StatefulNavigationShell navigationShell;
 
-  void _onDestinationSelected(int index) {
+  void _onTap(int index) {
     navigationShell.goBranch(
       index,
       initialLocation: index == navigationShell.currentIndex,
@@ -22,26 +22,26 @@ class MainShellScreen extends StatelessWidget {
       body: navigationShell,
       bottomNavigationBar: NavigationBar(
         selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: _onDestinationSelected,
+        onDestinationSelected: _onTap,
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.explore_outlined),
-            selectedIcon: Icon(Icons.explore),
-            label: 'Khám phá',
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Trang chủ',
           ),
           NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: 'Bản đồ',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.add_location_alt_outlined),
-            selectedIcon: Icon(Icons.add_location_alt),
+            icon: Icon(Icons.add_circle_outline_rounded),
+            selectedIcon: Icon(Icons.add_circle_rounded),
             label: 'Đăng bài',
           ),
           NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
+            icon: Icon(Icons.mail_outline_rounded),
+            selectedIcon: Icon(Icons.mail_rounded),
+            label: 'Hộp thư',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline_rounded),
+            selectedIcon: Icon(Icons.person_rounded),
             label: 'Cá nhân',
           ),
         ],
@@ -74,8 +74,8 @@ class TabPlaceholderScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(icon, size: 56, color: theme.colorScheme.primary),
-              const SizedBox(height: 16),
-              Text(title, style: theme.textTheme.titleLarge),
+              const SizedBox(height: 12),
+              Text(title, style: theme.textTheme.headlineSmall),
               const SizedBox(height: 8),
               Text(
                 subtitle,

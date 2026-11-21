@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../../core/services/service_providers.dart';
 import '../../../core/utils/cloudinary_url_helper.dart';
 import '../../auth/presentation/auth_providers.dart';
+import '../domain/user_profile_model.dart';
 import 'profile_providers.dart';
 import 'widgets/profile_spots_grid.dart';
 
@@ -21,6 +23,17 @@ class ProfileScreen extends ConsumerStatefulWidget {
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final ImagePicker _picker = ImagePicker();
   bool _isUploadingAvatar = false;
+  String? _ensuredUid;
+
+  void _ensureUsernameOnce(User authUser) {
+    if (_ensuredUid == authUser.uid) return;
+    _ensuredUid = authUser.uid;
+    ref.read(profileRepositoryProvider).ensureDefaultUsername(
+          userId: authUser.uid,
+          email: authUser.email ?? '',
+          displayName: authUser.displayName ?? '',
+        );
+  }
 
   Future<void> _pickAndUploadAvatar(User authUser) async {
     if (_isUploadingAvatar) return;
@@ -62,56 +75,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     }
   }
 
-  Future<void> _showEditBioDialog(String userId, String currentBio) async {
-    final controller = TextEditingController(text: currentBio);
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Tiểu sử'),
-        content: TextField(
-          controller: controller,
-          maxLines: 3,
-          maxLength: 120,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Giới thiệu ngắn về bạn hoặc phong cách du lịch...',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Hủy'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              minimumSize: const Size(0, 40),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-            ),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Lưu'),
-          ),
-        ],
-      ),
+  Future<void> _copyHandle(String handle) async {
+    await Clipboard.setData(ClipboardData(text: handle));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Đã sao chép $handle')),
     );
-
-    if (saved == true && mounted) {
-      try {
-        await ref.read(profileRepositoryProvider).updateUserBio(
-              userId: userId,
-              bio: controller.text,
-            );
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Đã cập nhật tiểu sử.')),
-        );
-      } catch (e) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Cập nhật tiểu sử thất bại: $e')),
-        );
-      }
-    }
-    controller.dispose();
   }
 
   Future<void> _signOut() async {
@@ -126,6 +95,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         body: Center(child: Text('Vui lòng đăng nhập để xem hồ sơ.')),
       );
     }
+
+    _ensureUsernameOnce(authUser);
 
     final userDataStream =
         ref.watch(profileRepositoryProvider).watchUserData(authUser.uid);
@@ -142,9 +113,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                     ? authUser.displayName!.trim()
                     : (authUser.email ?? 'SpotShare User').split('@').first);
         final email = (data['email'] as String?) ?? (authUser.email ?? '');
-        final handle = email.isNotEmpty
-            ? '@${email.split('@').first}'
-            : '@${authUser.uid.substring(0, 8)}';
+        final savedUsername =
+            (data['username'] as String?)?.trim().toLowerCase() ?? '';
+        final fallbackUsername = email.isNotEmpty
+            ? UserProfileModel.normalizeUsername(email.split('@').first)
+            : authUser.uid.substring(0, 8).toLowerCase();
+        final username =
+            savedUsername.isNotEmpty ? savedUsername : fallbackUsername;
+        final handle = '@$username';
+
         final rawAvatar =
             ((data['avatarUrl'] as String?)?.trim().isNotEmpty == true)
                 ? (data['avatarUrl'] as String).trim()
@@ -162,8 +139,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           child: Scaffold(
             appBar: AppBar(
               leading: IconButton(
-                onPressed: () => _showEditBioDialog(authUser.uid, bio),
-                tooltip: 'Chỉnh sửa tiểu sử',
+                onPressed: () => context.push('/profile/edit'),
+                tooltip: 'Sửa hồ sơ',
                 icon: const Icon(Icons.edit_outlined),
               ),
               actions: [
@@ -199,10 +176,37 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 2),
-                                  Text(
-                                    handle,
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: theme.colorScheme.onSurfaceVariant,
+                                  InkWell(
+                                    onTap: () => _copyHandle(handle),
+                                    borderRadius: BorderRadius.circular(6),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 2,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Flexible(
+                                            child: Text(
+                                              handle,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.bodyMedium
+                                                  ?.copyWith(
+                                                color: theme.colorScheme
+                                                    .onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Icon(
+                                            Icons.copy_rounded,
+                                            size: 13,
+                                            color: theme
+                                                .colorScheme.onSurfaceVariant,
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(height: 14),
@@ -290,7 +294,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         const SizedBox(height: 16),
                         if (bio.isEmpty)
                           InkWell(
-                            onTap: () => _showEditBioDialog(authUser.uid, bio),
+                            onTap: () => context.push('/profile/edit'),
                             borderRadius: BorderRadius.circular(20),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
@@ -317,7 +321,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           )
                         else
                           InkWell(
-                            onTap: () => _showEditBioDialog(authUser.uid, bio),
+                            onTap: () => context.push('/profile/edit'),
                             borderRadius: BorderRadius.circular(8),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 4),

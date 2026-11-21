@@ -7,7 +7,9 @@ import '../../features/auth/presentation/auth_providers.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/explore/presentation/explore_feed_screen.dart';
+import '../../features/profile/presentation/edit_profile_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
+import '../../features/profile/presentation/public_profile_screen.dart';
 import '../../features/spots/domain/spot_model.dart';
 import '../../features/spots/presentation/create/create_spot_screen.dart';
 import '../../features/spots/presentation/detail/spot_detail_screen.dart';
@@ -51,6 +53,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const RegisterScreen(),
       ),
       GoRoute(
+        path: '/profile/edit',
+        builder: (context, state) => const EditProfileScreen(),
+      ),
+      GoRoute(
+        path: '/users/:uid',
+        builder: (context, state) {
+          final uid = state.pathParameters['uid'] ?? '';
+          return PublicProfileScreen(userId: uid);
+        },
+      ),
+      GoRoute(
         path: '/spots/:id/edit',
         builder: (context, state) {
           final spotId = state.pathParameters['id'] ?? '';
@@ -90,21 +103,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: '/map',
-                builder: (context, state) => const TabPlaceholderScreen(
-                  title: 'Bản đồ',
-                  subtitle:
-                      'Bản đồ OpenStreetMap và ghim tọa độ sẽ được xây dựng ở Chặng 3.',
-                  icon: Icons.map_outlined,
-                ),
+                path: '/create',
+                builder: (context, state) => const CreateSpotScreen(),
               ),
             ],
           ),
           StatefulShellBranch(
             routes: [
               GoRoute(
-                path: '/create',
-                builder: (context, state) => const CreateSpotScreen(),
+                path: '/notifications',
+                builder: (context, state) => const TabPlaceholderScreen(
+                  title: 'Hộp thư',
+                  subtitle:
+                      'Thông báo tương tác, bình luận và cột mốc lượt thích sẽ được cập nhật ở giai đoạn Thông báo đẩy.',
+                  icon: Icons.mail_outline_rounded,
+                ),
               ),
             ],
           ),

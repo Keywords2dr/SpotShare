@@ -11,7 +11,9 @@ import '../../../../core/services/place_search_service.dart';
 import '../../../../core/services/service_providers.dart';
 import '../../../../core/utils/cloudinary_url_helper.dart';
 import '../../domain/spot_model.dart';
+import '../../domain/spot_tag_presets.dart';
 import '../spot_providers.dart';
+import '../widgets/spot_tag_selector.dart';
 
 class EditSpotScreen extends ConsumerStatefulWidget {
   const EditSpotScreen({
@@ -28,33 +30,6 @@ class EditSpotScreen extends ConsumerStatefulWidget {
 }
 
 class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
-  static const List<String> _categories = [
-    'Bãi biển',
-    'Cảnh đẹp / Check-in',
-    'Món ăn ngon',
-    'Quán cà phê view đẹp',
-  ];
-
-  static const List<String> _bestTimeOptions = [
-    'Sáng sớm (5h–8h)',
-    'Chiều hoàng hôn (16h–18h)',
-    'Buổi tối / Đêm',
-    'Cả ngày',
-  ];
-
-  static const List<String> _difficultyOptions = [
-    'Dễ đi / Ô tô tới nơi',
-    'Xe máy / Đường đèo nhẹ',
-    'Đi bộ / Trekking ngắn',
-  ];
-
-  static const List<String> _priceOptions = [
-    'Miễn phí',
-    '< 50k',
-    '50k – 150k',
-    '> 150k',
-  ];
-
   final _formKey = GlobalKey<FormState>();
   final _titleController = TextEditingController();
   final _descriptionController = TextEditingController();
@@ -73,10 +48,10 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
   double? _selectedLat;
   double? _selectedLng;
 
-  String _selectedCategory = _categories.first;
-  String _selectedBestTime = _bestTimeOptions.first;
-  String _selectedDifficulty = _difficultyOptions.first;
-  String _selectedPrice = _priceOptions[2];
+  String _selectedCategory = SpotTagPresets.defaultCategories.first;
+  String _selectedBestTime = '';
+  String _selectedDifficulty = '';
+  String _selectedPrice = '';
 
   bool _isInitialized = false;
   bool _isSaving = false;
@@ -113,18 +88,12 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
       ..clear()
       ..addAll(spot.imageUrls);
 
-    if (_categories.contains(spot.category)) {
-      _selectedCategory = spot.category;
-    }
-    if (_bestTimeOptions.contains(spot.bestTimeTag)) {
-      _selectedBestTime = spot.bestTimeTag;
-    }
-    if (_difficultyOptions.contains(spot.difficultyTag)) {
-      _selectedDifficulty = spot.difficultyTag;
-    }
-    if (_priceOptions.contains(spot.priceTag)) {
-      _selectedPrice = spot.priceTag;
-    }
+    _selectedCategory = spot.category.trim().isNotEmpty
+        ? spot.category.trim()
+        : SpotTagPresets.defaultCategories.first;
+    _selectedBestTime = spot.bestTimeTag.trim();
+    _selectedDifficulty = spot.difficultyTag.trim();
+    _selectedPrice = spot.priceTag.trim();
   }
 
   int get _totalImagesCount => _existingImageUrls.length + _newImages.length;
@@ -257,6 +226,13 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
       return;
     }
 
+    if (_selectedCategory.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Vui lòng chọn hoặc nhập danh mục.')),
+      );
+      return;
+    }
+
     if (_selectedLat == null ||
         _selectedLng == null ||
         _selectedAddress.isEmpty) {
@@ -335,39 +311,6 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
     }
   }
 
-  Widget _buildChoiceSection({
-    required String label,
-    required List<String> options,
-    required String selectedValue,
-    required ValueChanged<String> onSelected,
-  }) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: options.map((option) {
-            final isSelected = option == selectedValue;
-            return ChoiceChip(
-              label: Text(option),
-              selected: isSelected,
-              onSelected: (_) => onSelected(option),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final spotAsync = ref.watch(spotDetailProvider(widget.spotId));
@@ -394,6 +337,7 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
     }
 
     final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     final totalItems = _totalImagesCount + (_totalImagesCount < 6 ? 1 : 0);
 
     return Scaffold(
@@ -408,16 +352,40 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Hình ảnh ($_totalImagesCount/6)',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+                Text.rich(
+                  TextSpan(
+                    text: 'Hình ảnh ($_totalImagesCount/6) ',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: '*',
+                        style: TextStyle(
+                          color: colors.error,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                TextButton.icon(
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                  ),
                   onPressed: _isSaving ? null : _pickImages,
-                  icon: const Icon(Icons.add_photo_alternate_outlined),
-                  label: const Text('Thêm ảnh'),
+                  icon: const Icon(
+                    Icons.add_photo_alternate_outlined,
+                    size: 18,
+                  ),
+                  label: const Text(
+                    'Thêm ảnh',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
               ],
             ),
@@ -445,12 +413,12 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                             placeholder: (_, _) => Container(
                               width: 108,
                               height: 108,
-                              color: theme.colorScheme.surfaceContainerHighest,
+                              color: colors.surfaceContainerHighest,
                             ),
                             errorWidget: (_, _, _) => Container(
                               width: 108,
                               height: 108,
-                              color: theme.colorScheme.surfaceContainerHighest,
+                              color: colors.surfaceContainerHighest,
                               alignment: Alignment.center,
                               child: const Icon(Icons.broken_image_outlined),
                             ),
@@ -462,15 +430,20 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                             right: 4,
                             child: InkWell(
                               onTap: () => _removeExistingImage(index),
+                              borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
+                                decoration: BoxDecoration(
+                                  color: colors.error,
                                   shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
                                 ),
                                 padding: const EdgeInsets.all(4),
                                 child: const Icon(
-                                  Icons.close,
-                                  size: 16,
+                                  Icons.close_rounded,
+                                  size: 14,
                                   color: Colors.white,
                                 ),
                               ),
@@ -495,7 +468,7 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                             errorBuilder: (_, _, _) => Container(
                               width: 108,
                               height: 108,
-                              color: theme.colorScheme.surfaceContainerHighest,
+                              color: colors.surfaceContainerHighest,
                               alignment: Alignment.center,
                               padding: const EdgeInsets.all(6),
                               child: Text(
@@ -514,15 +487,20 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                             right: 4,
                             child: InkWell(
                               onTap: () => _removeNewImage(newIndex),
+                              borderRadius: BorderRadius.circular(12),
                               child: Container(
-                                decoration: const BoxDecoration(
-                                  color: Colors.black54,
+                                decoration: BoxDecoration(
+                                  color: colors.error,
                                   shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 1.5,
+                                  ),
                                 ),
                                 padding: const EdgeInsets.all(4),
                                 child: const Icon(
-                                  Icons.close,
-                                  size: 16,
+                                  Icons.close_rounded,
+                                  size: 14,
                                   color: Colors.white,
                                 ),
                               ),
@@ -540,21 +518,24 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: theme.colorScheme.outlineVariant,
+                          color: colors.primary.withValues(alpha: 0.45),
                         ),
-                        color: theme.colorScheme.surfaceContainerLow,
+                        color: colors.primaryContainer.withValues(alpha: 0.25),
                       ),
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
                             Icons.add_a_photo_outlined,
-                            color: theme.colorScheme.primary,
+                            color: colors.primary,
                           ),
                           const SizedBox(height: 4),
                           Text(
                             'Thêm ảnh',
-                            style: theme.textTheme.bodySmall,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: colors.primary,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ],
                       ),
@@ -576,7 +557,7 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                             ? _statusMessage
                             : 'Đang lưu...',
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -609,7 +590,11 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                     : (_placeSearchController.text.isNotEmpty
                         ? IconButton(
                             onPressed: _isSaving ? null : _clearSelectedPlace,
-                            icon: const Icon(Icons.clear),
+                            tooltip: 'Xóa địa chỉ',
+                            icon: Icon(
+                              Icons.cancel_rounded,
+                              color: colors.error,
+                            ),
                           )
                         : null),
               ),
@@ -619,7 +604,8 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
               Text(
                 _placeError!,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.error,
+                  color: colors.error,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -639,7 +625,7 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                       dense: true,
                       leading: Icon(
                         Icons.location_on_outlined,
-                        color: theme.colorScheme.primary,
+                        color: colors.primary,
                       ),
                       title: Text(
                         item.mainText,
@@ -664,11 +650,10 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color:
-                      theme.colorScheme.primaryContainer.withValues(alpha: 0.45),
+                  color: colors.primaryContainer.withValues(alpha: 0.45),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: theme.colorScheme.primary.withValues(alpha: 0.4),
+                    color: colors.primary.withValues(alpha: 0.4),
                   ),
                 ),
                 child: Row(
@@ -676,7 +661,7 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                   children: [
                     Icon(
                       Icons.check_circle_outline,
-                      color: theme.colorScheme.primary,
+                      color: colors.primary,
                       size: 20,
                     ),
                     const SizedBox(width: 10),
@@ -692,14 +677,44 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'GPS: ${_selectedLat!.toStringAsFixed(5)}, ${_selectedLng!.toStringAsFixed(5)}',
+                            'Tọa độ: ${_selectedLat!.toStringAsFixed(5)}, ${_selectedLng!.toStringAsFixed(5)}',
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                              color: colors.onSurfaceVariant,
                             ),
                           ),
                         ],
                       ),
                     ),
+                    if (!_isSaving) ...[
+                      const SizedBox(width: 8),
+                      Material(
+                        color: colors.errorContainer.withValues(alpha: 0.7),
+                        shape: StadiumBorder(
+                          side: BorderSide(
+                            color: colors.error.withValues(alpha: 0.45),
+                            width: 0.8,
+                          ),
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: _clearSelectedPlace,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 9,
+                              vertical: 4,
+                            ),
+                            child: Text(
+                              'Xóa',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: colors.error,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -720,16 +735,13 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                 return null;
               },
             ),
-            const SizedBox(height: 16),
-            _buildChoiceSection(
-              label: 'Danh mục chính *',
-              options: _categories,
-              selectedValue: _selectedCategory,
-              onSelected: _isSaving
-                  ? (_) {}
-                  : (value) => setState(() => _selectedCategory = value),
+            const SizedBox(height: 18),
+            SpotCategorySelector(
+              selectedCategory: _selectedCategory,
+              enabled: !_isSaving,
+              onChanged: (value) => setState(() => _selectedCategory = value),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 18),
             TextFormField(
               controller: _descriptionController,
               enabled: !_isSaving,
@@ -746,34 +758,23 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
               },
             ),
             const SizedBox(height: 18),
-            _buildChoiceSection(
-              label: 'Quick Tag — Giờ đẹp nhất',
-              options: _bestTimeOptions,
-              selectedValue: _selectedBestTime,
-              onSelected: _isSaving
-                  ? (_) {}
-                  : (value) => setState(() => _selectedBestTime = value),
-            ),
-            const SizedBox(height: 16),
-            _buildChoiceSection(
-              label: 'Quick Tag — Đường đi',
-              options: _difficultyOptions,
-              selectedValue: _selectedDifficulty,
-              onSelected: _isSaving
-                  ? (_) {}
-                  : (value) => setState(() => _selectedDifficulty = value),
-            ),
-            const SizedBox(height: 16),
-            _buildChoiceSection(
-              label: 'Quick Tag — Khoảng giá tham khảo',
-              options: _priceOptions,
-              selectedValue: _selectedPrice,
-              onSelected: _isSaving
-                  ? (_) {}
-                  : (value) => setState(() => _selectedPrice = value),
+            SpotQuickTagsSelector(
+              category: _selectedCategory,
+              bestTimeTag: _selectedBestTime,
+              difficultyTag: _selectedDifficulty,
+              priceTag: _selectedPrice,
+              enabled: !_isSaving,
+              onBestTimeChanged: (value) =>
+                  setState(() => _selectedBestTime = value),
+              onDifficultyChanged: (value) =>
+                  setState(() => _selectedDifficulty = value),
+              onPriceChanged: (value) => setState(() => _selectedPrice = value),
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
               onPressed: _isSaving ? null : _saveChanges,
               icon: _isSaving
                   ? const SizedBox(
@@ -782,7 +783,13 @@ class _EditSpotScreenState extends ConsumerState<EditSpotScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.save_outlined),
-              label: Text(_isSaving ? 'Đang lưu...' : 'Lưu thay đổi'),
+              label: Text(
+                _isSaving ? 'Đang lưu...' : 'Lưu thay đổi',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ),
             const SizedBox(height: 16),
           ],

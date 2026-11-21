@@ -11,7 +11,9 @@ import '../../../profile/presentation/profile_providers.dart';
 import '../../../social/presentation/social_providers.dart';
 import '../../../social/presentation/widgets/review_section.dart';
 import '../../domain/spot_model.dart';
+import '../../domain/spot_tag_presets.dart';
 import '../spot_providers.dart';
+import '../widgets/spot_tag_selector.dart';
 import 'widgets/spot_image_carousel.dart';
 
 class SpotDetailScreen extends ConsumerStatefulWidget {
@@ -144,7 +146,10 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
               foregroundColor: Theme.of(dialogContext).colorScheme.onError,
             ),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Xóa'),
+            child: const Text(
+              'Xóa',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
           ),
         ],
       ),
@@ -212,8 +217,9 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
 
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final transportTags = SpotTagPresets.parseMultiTag(spot.difficultyTag);
     final hasTags = spot.bestTimeTag.isNotEmpty ||
-        spot.difficultyTag.isNotEmpty ||
+        transportTags.isNotEmpty ||
         spot.priceTag.isNotEmpty;
 
     return Scaffold(
@@ -318,7 +324,10 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                           children: [
                             Icon(Icons.edit_outlined, size: 20),
                             SizedBox(width: 10),
-                            Text('Chỉnh sửa bài viết'),
+                            Text(
+                              'Chỉnh sửa bài viết',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
                           ],
                         ),
                       ),
@@ -334,7 +343,10 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                             const SizedBox(width: 10),
                             Text(
                               'Xóa bài viết',
-                              style: TextStyle(color: colors.error),
+                              style: TextStyle(
+                                color: colors.error,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ],
                         ),
@@ -416,8 +428,8 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                 SpotImageCarousel(images: spot.imageUrls),
                 Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 6,
+                    horizontal: 10,
+                    vertical: 8,
                   ),
                   child: Row(
                     children: [
@@ -425,28 +437,30 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                         icon: isLiked
                             ? Icons.favorite_rounded
                             : Icons.favorite_border_rounded,
-                        iconColor: isLiked ? Colors.redAccent : null,
+                        activeColor: Colors.redAccent,
+                        isActive: isLiked,
                         label: '${spot.likesCount}',
                         onTap: _isTogglingLike ? null : () => _toggleLike(spot),
                       ),
-                      const SizedBox(width: 2),
+                      const SizedBox(width: 6),
                       _ActionCounterButton(
                         icon: Icons.chat_bubble_outline_rounded,
                         label: '${spot.ratingCount}',
                         onTap: () => _commentFocusNode.requestFocus(),
                       ),
-                      const SizedBox(width: 2),
+                      const SizedBox(width: 6),
                       _ActionCounterButton(
                         icon: isSaved
                             ? Icons.bookmark_rounded
                             : Icons.bookmark_border_rounded,
-                        iconColor: isSaved ? colors.primary : null,
+                        activeColor: colors.primary,
+                        isActive: isSaved,
                         label: isSaved ? 'Đã lưu' : 'Lưu',
                         onTap: _isTogglingSave ? null : () => _toggleSave(spot),
                       ),
                       const Spacer(),
                       Padding(
-                        padding: const EdgeInsets.only(right: 10),
+                        padding: const EdgeInsets.only(right: 6),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
@@ -462,7 +476,7 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                                   : 'Chưa có',
                               style: TextStyle(
                                 fontSize: 13.5,
-                                fontWeight: FontWeight.w600,
+                                fontWeight: FontWeight.w700,
                                 color: colors.onSurface,
                               ),
                             ),
@@ -498,10 +512,10 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                                     icon: Icons.wb_sunny_outlined,
                                     label: spot.bestTimeTag,
                                   ),
-                                if (spot.difficultyTag.isNotEmpty)
+                                for (final transport in transportTags)
                                   _QuickTagChip(
-                                    icon: Icons.directions_bike_outlined,
-                                    label: spot.difficultyTag,
+                                    icon: transportIconFor(transport),
+                                    label: transport,
                                   ),
                                 if (spot.priceTag.isNotEmpty)
                                   _QuickTagChip(
@@ -511,34 +525,66 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                               ],
                             ),
                           if (hasTags) const SizedBox(height: 10),
-                          InkWell(
-                            onTap: () => _copyCoordinates(spot),
-                            borderRadius: BorderRadius.circular(6),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.my_location_rounded,
-                                  size: 14,
-                                  color: colors.onSurfaceVariant,
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.my_location_rounded,
+                                size: 14,
+                                color: colors.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  'Tọa độ: ${spot.latitude.toStringAsFixed(5)}, ${spot.longitude.toStringAsFixed(5)}',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w400,
+                                    color: colors.onSurfaceVariant,
+                                  ),
                                 ),
-                                const SizedBox(width: 6),
-                                Expanded(
-                                  child: Text(
-                                    'Tọa độ: ${spot.latitude.toStringAsFixed(5)}, ${spot.longitude.toStringAsFixed(5)}',
-                                    style: TextStyle(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w400,
-                                      color: colors.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 8),
+                              Material(
+                                color: colors.primaryContainer
+                                    .withValues(alpha: 0.65),
+                                shape: StadiumBorder(
+                                  side: BorderSide(
+                                    color:
+                                        colors.primary.withValues(alpha: 0.35),
+                                    width: 0.8,
+                                  ),
+                                ),
+                                clipBehavior: Clip.antiAlias,
+                                child: InkWell(
+                                  onTap: () => _copyCoordinates(spot),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 9,
+                                      vertical: 4,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.copy_rounded,
+                                          size: 12.5,
+                                          color: colors.primary,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Sao chép',
+                                          style: TextStyle(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: colors.primary,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ),
-                                Icon(
-                                  Icons.copy_rounded,
-                                  size: 14,
-                                  color: colors.onSurfaceVariant,
-                                ),
-                              ],
-                            ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -569,41 +615,49 @@ class _ActionCounterButton extends StatelessWidget {
   const _ActionCounterButton({
     required this.icon,
     required this.label,
-    this.iconColor,
+    this.activeColor,
+    this.isActive = false,
     this.onTap,
   });
 
   final IconData icon;
   final String label;
-  final Color? iconColor;
+  final Color? activeColor;
+  final bool isActive;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return InkWell(
-      onTap: onTap,
+    final foreground =
+        isActive ? (activeColor ?? colors.primary) : colors.onSurfaceVariant;
+    final background = isActive
+        ? (activeColor ?? colors.primary).withValues(alpha: 0.12)
+        : Colors.transparent;
+
+    return Material(
+      color: background,
       borderRadius: BorderRadius.circular(20),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 19,
-              color: iconColor ?? colors.onSurfaceVariant,
-            ),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w500,
-                color: iconColor ?? colors.onSurfaceVariant,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 19, color: foreground),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                  color: foreground,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
