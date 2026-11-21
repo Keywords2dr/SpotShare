@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/auth_providers.dart';
+import '../../features/auth/presentation/forgot_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/explore/presentation/explore_feed_screen.dart';
@@ -33,7 +34,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final isLoggedIn = FirebaseAuth.instance.currentUser != null;
       final path = state.uri.path;
-      final isAuthRoute = path == '/login' || path == '/register';
+      final isAuthRoute = path == '/login' ||
+          path == '/register' ||
+          path == '/forgot-password';
 
       if (!isLoggedIn && !isAuthRoute) {
         return '/login';
@@ -51,6 +54,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterScreen(),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        builder: (context, state) {
+          final initialEmail =
+              state.extra is String ? state.extra as String : '';
+          return ForgotPasswordScreen(initialEmail: initialEmail);
+        },
       ),
       GoRoute(
         path: '/profile/edit',
