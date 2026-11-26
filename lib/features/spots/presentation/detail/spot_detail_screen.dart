@@ -7,7 +7,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/utils/cloudinary_url_helper.dart';
 import '../../../../core/utils/date_time_helper.dart';
+import '../../../profile/data/saved_collections_repository.dart';
 import '../../../profile/presentation/profile_providers.dart';
+import '../../../profile/presentation/saved_collections_controller.dart';
+import '../../../profile/presentation/widgets/saved_collections_sheets.dart';
 import '../../../social/presentation/social_providers.dart';
 import '../../../social/presentation/widgets/review_section.dart';
 import '../../domain/spot_model.dart';
@@ -36,8 +39,19 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
   final FocusNode _commentFocusNode = FocusNode();
 
   bool _isTogglingSave = false;
-  bool? _pendingSaved;
   bool _isDeletingSpot = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final uid = ref.read(spotDetailCurrentUserIdProvider)?.trim() ?? '';
+      if (uid.isNotEmpty) {
+        ref.read(savedCollectionsControllerProvider.notifier).load(userId: uid);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -45,11 +59,36 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
     super.dispose();
   }
 
-  void _showSnackBar(String message) {
+  SavedSpotItem _toSavedSpotItem(SpotModel spot) {
+    return SavedSpotItem(
+      id: spot.id,
+      title: spot.title,
+      category: spot.category,
+      thumbnailUrl: spot.imageUrls.isNotEmpty ? spot.imageUrls.first : '',
+      authorId: spot.authorId,
+      authorName: spot.authorName,
+      likesCount: spot.likesCount,
+      ratingAvg: spot.ratingAvg,
+      ratingCount: spot.ratingCount,
+      addressText: spot.addressText,
+      priceTag: spot.priceTag,
+      bestTimeTag: spot.bestTimeTag,
+      latitude: spot.latitude,
+      longitude: spot.longitude,
+      savedAt: DateTime.now(),
+    );
+  }
+
+  void _showSnackBar(String message, {SnackBarAction? action}) {
     if (!mounted) return;
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(content: Text(message)));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: action,
+      ),
+    );
   }
 
   void _navigateBack() {
@@ -73,6 +112,10 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
       ref.invalidate(
         spotIsLikedStreamProvider((spotId: widget.spotId, userId: userId)),
       );
+      ref.read(savedCollectionsControllerProvider.notifier).load(
+            userId: userId,
+            forceRefresh: true,
+          );
     }
     try {
       await ref.read(spotDetailProvider(widget.spotId).future);
@@ -104,53 +147,176 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
     }
   }
 
+  Future<void> _openCreateCollectionForSpot(
+    String userId,
+    SpotModel spot,
+  ) async {
+    if (!mounted) return;
+    final created = await showModalBottomSheet<Object?>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => CollectionEditorSheet(
+        userId: userId,
+        initialSpotIds: [spot.id],
+        seedSpot: _toSavedSpotItem(spot),
+      ),
+    );
+    if (created is SpotCollectionModel && mounted) {
+      _showSnackBar(
+        'Đã lưu "${spot.title}" vào bộ sưu tập "${created.name}".',
+      );
+    }
+  }
+
+  Future<void> _openAssignCollections(String userId, SpotModel spot) async {
+    if (!mounted) return;
+    final selectedCount = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => AssignSpotToCollectionsSheet(
+        userId: userId,
+        spotId: spot.id,
+        spotTitle: spot.title,
+        spotFallback: _toSavedSpotItem(spot),
+      ),
+    );
+    if (selectedCount != null && mounted) {
+      if (selectedCount == 0) {
+        _showSnackBar('Đã lưu "${spot.title}" vào mục Đã lưu.');
+      } else {
+        _showSnackBar(
+          'Đã lưu "${spot.title}" vào $selectedCount bộ sưu tập đã chọn.',
+        );
+      }
+    }
+  }
+
   Future<void> _toggleSave({
     required SpotModel spot,
     required bool currentSaved,
   }) async {
     if (_isTogglingSave) return;
-    final userId = ref.read(spotDetailCurrentUserIdProvider);
-    if (userId == null || userId.isEmpty) {
+    final userId = ref.read(spotDetailCurrentUserIdProvider)?.trim() ?? '';
+    if (userId.isEmpty) {
       _showSnackBar('Vui lòng đăng nhập để lưu địa điểm.');
       return;
     }
 
-    final nextSaved = !currentSaved;
-    setState(() {
-      _isTogglingSave = true;
-      _pendingSaved = nextSaved;
-    });
+    final savedNotifier =
+        ref.read(savedCollectionsControllerProvider.notifier);
+    if (!savedNotifier.stateFor(userId).hasLoaded) {
+      await savedNotifier.load(userId: userId);
+      if (!mounted) return;
+    }
 
-    try {
-      final saved =
-          await ref.read(interactionRepositoryProvider).toggleSaveSpot(
-                spotId: spot.id,
-                userId: userId,
-              );
-      if (!mounted) return;
-      final latestSaved = ref.read(spotSavedProvider(spot.id)).value;
-      setState(() {
-        _isTogglingSave = false;
-        _pendingSaved = latestSaved == saved ? null : saved;
-      });
-      _showSnackBar(
-        saved ? 'Đã lưu vào mục Đã lưu.' : 'Đã bỏ khỏi mục Đã lưu.',
-      );
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[SpotDetailScreen] toggleSave failed: $e');
+    final savedState = savedNotifier.stateFor(userId);
+    final containing = savedState.collectionsContainingSpot(spot.id);
+
+    if (!currentSaved) {
+      if (savedState.collections.isNotEmpty) {
+        final selectedCount = await showModalBottomSheet<int>(
+          context: context,
+          isScrollControlled: true,
+          useSafeArea: true,
+          builder: (_) => AssignSpotToCollectionsSheet(
+            userId: userId,
+            spotId: spot.id,
+            spotTitle: spot.title,
+            spotFallback: _toSavedSpotItem(spot),
+          ),
+        );
+        if (!mounted) return;
+        if (selectedCount != null && selectedCount > 0) {
+          _showSnackBar(
+            'Đã lưu "${spot.title}" vào $selectedCount bộ sưu tập đã chọn.',
+          );
+          return;
+        }
+        if (selectedCount == 0) {
+          _showSnackBar('Đã lưu vào mục Đã lưu.');
+          return;
+        }
       }
+
+      setState(() => _isTogglingSave = true);
+      final res = await savedNotifier.saveSpotToDefault(
+        userId: userId,
+        spot: _toSavedSpotItem(spot),
+      );
       if (!mounted) return;
-      setState(() {
-        _isTogglingSave = false;
-        _pendingSaved = null;
-      });
-      _showSnackBar(
-        SpotDetailErrorMapper.map(
-          e,
-          fallback: 'Không thể lưu địa điểm lúc này. Vui lòng thử lại.',
+      setState(() => _isTogglingSave = false);
+
+      if (res.success) {
+        _showSnackBar(
+          'Đã lưu vào mục Đã lưu.',
+          action: SnackBarAction(
+            label: savedState.collections.isEmpty
+                ? 'Tạo bộ sưu tập'
+                : 'Bộ sưu tập',
+            onPressed: () {
+              if (savedState.collections.isEmpty) {
+                _openCreateCollectionForSpot(userId, spot);
+              } else {
+                _openAssignCollections(userId, spot);
+              }
+            },
+          ),
+        );
+      } else if (res.errorMessage != null) {
+        _showSnackBar(res.errorMessage!);
+      }
+      return;
+    }
+
+    if (containing.length >= 2) {
+      final clearedAll = await showModalBottomSheet<bool>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => RemoveSpotFromCollectionsSheet(
+          userId: userId,
+          spotId: spot.id,
+          spotTitle: spot.title,
         ),
       );
+      if (clearedAll == true && mounted) {
+        _showSnackBar('Đã bỏ lưu hoàn toàn "${spot.title}".');
+      }
+      return;
+    }
+
+    setState(() => _isTogglingSave = true);
+    if (containing.length == 1) {
+      final onlyCollection = containing.first;
+      final res = await savedNotifier.removeSpotFromCollection(
+        userId: userId,
+        collectionId: onlyCollection.id,
+        spotId: spot.id,
+      );
+      if (!mounted) return;
+      setState(() => _isTogglingSave = false);
+      if (res.success) {
+        _showSnackBar(
+          'Đã bỏ lưu hoàn toàn khỏi bộ sưu tập "${onlyCollection.name}".',
+        );
+      } else if (res.errorMessage != null) {
+        _showSnackBar(res.errorMessage!);
+      }
+      return;
+    }
+
+    final res = await savedNotifier.unsaveUncategorizedSpot(
+      userId: userId,
+      spotId: spot.id,
+    );
+    if (!mounted) return;
+    setState(() => _isTogglingSave = false);
+    if (res.success) {
+      _showSnackBar('Đã bỏ khỏi mục Đã lưu.');
+    } else if (res.errorMessage != null) {
+      _showSnackBar(res.errorMessage!);
     }
   }
 
@@ -293,17 +459,6 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
       }
     });
 
-    ref.listen<AsyncValue<bool>>(spotSavedProvider(widget.spotId), (_, next) {
-      final serverSaved = next.value;
-      if (!_isTogglingSave &&
-          _pendingSaved != null &&
-          serverSaved == _pendingSaved) {
-        setState(() {
-          _pendingSaved = null;
-        });
-      }
-    });
-
     final spotAsync = ref.watch(spotDetailProvider(widget.spotId));
     final spot = spotAsync.value ?? widget.initialSpot;
 
@@ -362,12 +517,18 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
         (spot.likesCount < 0 ? 0 : spot.likesCount);
     final isLikeProcessing = likeOverride?.isProcessing ?? false;
 
-    final serverSaved = ref.watch(spotSavedProvider(spot.id)).value ?? false;
-    final displaySaved = SpotOptimisticResolver.resolveBool(
-      serverValue: serverSaved,
-      pendingValue: _pendingSaved,
-      isProcessing: _isTogglingSave,
-    );
+    final serverDefaultSaved =
+        ref.watch(spotSavedProvider(spot.id)).value ?? false;
+    final savedViewState = currentUserId.isEmpty
+        ? const SavedCollectionsViewState()
+        : ref.watch(
+            savedCollectionsControllerProvider.select(
+              (map) => map[currentUserId] ?? const SavedCollectionsViewState(),
+            ),
+          );
+    final displaySaved = savedViewState.hasLoaded
+        ? savedViewState.isSpotSavedAnywhere(spot.id)
+        : (serverDefaultSaved || savedViewState.isSpotInAnyCollection(spot.id));
 
     final liveAuthorAvatar =
         ref.watch(userAvatarProvider(spot.authorId)).value ?? '';
@@ -498,6 +659,8 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
               onSelected: (value) {
                 if (value == 'share') {
                   _copyShareSummary(spot);
+                } else if (value == 'collection' && currentUserId.isNotEmpty) {
+                  _openAssignCollections(currentUserId, spot);
                 } else if (value == 'edit') {
                   context.push('/spots/${spot.id}/edit', extra: spot);
                 } else if (value == 'delete') {
@@ -507,6 +670,20 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                 }
               },
               itemBuilder: (context) => [
+                if (currentUserId.isNotEmpty)
+                  const PopupMenuItem<String>(
+                    value: 'collection',
+                    child: Row(
+                      children: [
+                        Icon(Icons.create_new_folder_outlined, size: 20),
+                        SizedBox(width: 10),
+                        Text(
+                          'Chọn bộ sưu tập',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
                 const PopupMenuItem<String>(
                   value: 'share',
                   child: Row(

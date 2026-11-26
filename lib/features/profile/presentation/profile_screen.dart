@@ -12,9 +12,11 @@ import '../../auth/presentation/auth_providers.dart';
 import '../domain/user_profile_model.dart';
 import 'liked_spots_controller.dart';
 import 'profile_providers.dart';
+import 'saved_collections_controller.dart';
 import 'widgets/liked_spots_tab.dart';
 import 'widgets/profile_screen_support.dart';
 import 'widgets/profile_spots_grid.dart';
+import 'widgets/saved_collections_tab.dart';
 
 final profileUserDataStreamProvider =
     StreamProvider.autoDispose.family<ProfileDataMap, String>((ref, userId) {
@@ -144,6 +146,11 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     ref.invalidate(profileUserDataStreamProvider(userId));
     ref.invalidate(userSpotsProvider(userId));
     ref.invalidate(savedSpotsProvider(userId));
+    ref.read(savedCollectionsControllerProvider.notifier).load(
+          userId: userId,
+          forceRefresh: true,
+          cleanupOrphans: true,
+        );
     ref.read(likedSpotsControllerProvider.notifier).load(
           userId: userId,
           forceRefresh: true,
@@ -296,12 +303,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 actionLabel: 'Tải lên',
                 onAction: () => context.go('/create'),
               ),
-              ProfileSpotsGrid(
-                provider: savedSpotsProvider(authUser.uid),
-                emptyIcon: Icons.bookmark_border_rounded,
-                emptyTitle: 'Chưa có địa điểm đã lưu',
-                emptySubtitle:
-                    'Bấm biểu tượng Lưu trong trang chi tiết địa điểm để xem lại sau.',
+              SavedCollectionsTab(
+                userId: authUser.uid,
               ),
               LikedSpotsTab(
                 userId: authUser.uid,
