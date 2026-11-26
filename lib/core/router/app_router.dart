@@ -49,13 +49,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     initialLocation: '/explore',
     refreshListenable: refreshNotifier,
     redirect: (context, state) {
-      final authAsync = ref.read(authStateProvider);
-      final currentUser = authAsync.when(
-        data: (user) => user,
-        loading: () => FirebaseAuth.instance.currentUser,
-        error: (_, _) => FirebaseAuth.instance.currentUser,
-      );
-      final isLoggedIn = currentUser != null;
+      final isLoggedIn = FirebaseAuth.instance.currentUser != null;
       final path = state.uri.path;
       final isAuthRoute = path == '/login' ||
           path == '/register' ||

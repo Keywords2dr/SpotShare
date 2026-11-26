@@ -87,9 +87,24 @@ class FirebaseLoginAuthGateway implements LoginAuthGateway {
       if (user != null) {
         await _ensureUserDocument(user);
       }
-    } on FirebaseAuthException catch (e) {
+    } on FirebaseAuthException catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          '[LoginAuthGateway] signInWithEmail failed (${e.code}): ${e.message}\n$st',
+        );
+      }
       throw _mapAuthException(e);
-    } catch (_) {
+    } on PlatformException catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          '[LoginAuthGateway] signInWithEmail PlatformException (${e.code}): ${e.message}\n$st',
+        );
+      }
+      throw _mapPlatformException(e);
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint('[LoginAuthGateway] signInWithEmail unexpected: $e\n$st');
+      }
       throw const LoginException(
         'Không thể đăng nhập lúc này. Vui lòng kiểm tra kết nối mạng và thử lại.',
         code: 'unknown',
@@ -101,24 +116,62 @@ class FirebaseLoginAuthGateway implements LoginAuthGateway {
   Future<void> signInWithGoogle() async {
     try {
       final googleProvider = GoogleAuthProvider()
+        ..addScope('email')
+        ..addScope('profile')
         ..setCustomParameters({'prompt': 'select_account'});
 
       final UserCredential credential;
       if (kIsWeb) {
         credential = await _auth.signInWithPopup(googleProvider);
-      } else {
+      } else if (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS) {
         credential = await _auth.signInWithProvider(googleProvider);
+      } else {
+        throw const LoginException(
+          'Đăng nhập bằng Google chưa hỗ trợ trên nền tảng này. Vui lòng đăng nhập bằng Email hoặc chạy trên Android/Web.',
+          code: 'unsupported-platform',
+        );
       }
 
       final user = credential.user;
       if (user != null) {
         await _ensureUserDocument(user);
       }
-    } on FirebaseAuthException catch (e) {
+    } on LoginException {
+      rethrow;
+    } on FirebaseAuthException catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          '[LoginAuthGateway] signInWithGoogle FirebaseAuthException (${e.code}): ${e.message}\n$st',
+        );
+      }
       throw _mapAuthException(e);
-    } catch (_) {
+    } on PlatformException catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          '[LoginAuthGateway] signInWithGoogle PlatformException (${e.code}): ${e.message}\n$st',
+        );
+      }
+      throw _mapPlatformException(e);
+    } on UnimplementedError catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          '[LoginAuthGateway] signInWithGoogle UnimplementedError: $e\n$st',
+        );
+      }
       throw const LoginException(
-        'Đăng nhập bằng Google thất bại. Vui lòng thử lại.',
+        'Đăng nhập bằng Google chưa được hỗ trợ trên nền tảng này. Vui lòng dùng Email hoặc chạy trên Android/Web.',
+        code: 'unimplemented',
+      );
+    } catch (e, st) {
+      if (kDebugMode) {
+        debugPrint(
+          '[LoginAuthGateway] signInWithGoogle unexpected error: $e\n$st',
+        );
+      }
+      final detail = kDebugMode ? ' ($e)' : '';
+      throw LoginException(
+        'Đăng nhập bằng Google thất bại$detail. Vui lòng thử lại.',
         code: 'google-sign-in-failed',
       );
     }
@@ -127,30 +180,63 @@ class FirebaseLoginAuthGateway implements LoginAuthGateway {
   Future<void> _ensureUserDocument(User user) async {
     try {
       final docRef = _db.collection('users').doc(user.uid);
-      final snapshot = await docRef.get();
+      final snapshot = await docRef.get().timeout(const Duration(seconds: 6));
       if (snapshot.exists) return;
 
       final fallbackName = (user.displayName?.trim().isNotEmpty ?? false)
           ? user.displayName!.trim()
           : (user.email?.split('@').first ?? 'Thành viên SpotShare');
 
-      await docRef.set(
-        {
-          'uid': user.uid,
-          'displayName': fallbackName,
-          'email': user.email ?? '',
-          'avatarUrl': user.photoURL ?? '',
-          'bio': '',
-          'spotsCount': 0,
-          'totalLikes': 0,
-          'followersCount': 0,
-          'followingCount': 0,
-          'fcmToken': '',
-          'createdAt': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
+      await docRef
+          .set(
+            {
+              'uid': user.uid,
+              'displayName': fallbackName,
+              'email': user.email ?? '',
+              'avatarUrl': user.photoURL ?? '',
+              'bio': '',
+              'spotsCount': 0,
+              'totalLikes': 0,
+              'followersCount': 0,
+              'followingCount': 0,
+              'fcmToken': '',
+              'createdAt': FieldValue.serverTimestamp(),
+            },
+            SetOptions(merge: true),
+          )
+          .timeout(const Duration(seconds: 6));
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[LoginAuthGateway] _ensureUserDocument skipped: $e');
+      }
+    }
+  }
+
+  static LoginException _mapPlatformException(PlatformException e) {
+    final code = e.code.toLowerCase();
+    final msg = (e.message ?? '').toLowerCase();
+
+    if (code.contains('cancel') || msg.contains('cancel')) {
+      return LoginException('', code: e.code, isCanceled: true);
+    }
+    if (code == 'network_error' || msg.contains('network')) {
+      return LoginException(
+        'Mất kết nối mạng. Vui lòng kiểm tra Internet và thử lại.',
+        code: e.code,
       );
-    } catch (_) {}
+    }
+    if (code == 'sign_in_failed' ||
+        msg.contains('apiexception: 10') ||
+        msg.contains('developer_error')) {
+      return LoginException(
+        'Lỗi cấu hình Google Sign-In trên Android (${e.code}). Hãy kiểm tra SHA-1/SHA-256 trên Firebase và file google-services.json.',
+        code: e.code,
+      );
+    }
+    return LoginException(
+      'Đăng nhập bằng Google thất bại (${e.code}). Vui lòng thử lại.',
+      code: e.code,
+    );
   }
 
   static LoginException _mapAuthException(FirebaseAuthException e) {
@@ -189,14 +275,27 @@ class FirebaseLoginAuthGateway implements LoginAuthGateway {
           'Trình duyệt đang chặn cửa sổ đăng nhập Google. Hãy bật cho phép pop-up và thử lại.',
           code: e.code,
         );
+      case 'web-context-already-presented':
+        return LoginException(
+          'Cửa sổ đăng nhập Google đang mở. Vui lòng hoàn tất hoặc đóng cửa sổ cũ rồi thử lại.',
+          code: e.code,
+        );
       case 'popup-closed-by-user':
       case 'cancelled-popup-request':
+      case 'web-context-cancelled':
+      case 'user-cancelled':
+      case 'sign_in_canceled':
       case 'canceled':
       case 'cancelled':
         return LoginException(
           '',
           code: e.code,
           isCanceled: true,
+        );
+      case 'unauthorized-domain':
+        return LoginException(
+          'Tên miền hiện tại chưa được cấp phép trong Firebase Authentication (Authorized domains).',
+          code: e.code,
         );
       case 'account-exists-with-different-credential':
         return LoginException(
@@ -206,6 +305,11 @@ class FirebaseLoginAuthGateway implements LoginAuthGateway {
       case 'operation-not-allowed':
         return LoginException(
           'Phương thức đăng nhập này chưa được bật trên hệ thống.',
+          code: e.code,
+        );
+      case 'internal-error':
+        return LoginException(
+          'Lỗi xác thực Google (internal-error). Hãy kiểm tra cấu hình Google Sign-In, SHA-1/SHA-256 và google-services.json trên Firebase.',
           code: e.code,
         );
       default:
