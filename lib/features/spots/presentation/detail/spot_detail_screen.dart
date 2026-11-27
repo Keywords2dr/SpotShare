@@ -26,10 +26,12 @@ class SpotDetailScreen extends ConsumerStatefulWidget {
     super.key,
     required this.spotId,
     this.initialSpot,
+    this.initialReviewId,
   });
 
   final String spotId;
   final SpotModel? initialSpot;
+  final String? initialReviewId;
 
   @override
   ConsumerState<SpotDetailScreen> createState() => _SpotDetailScreenState();
@@ -491,7 +493,8 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
         body: SpotDetailErrorView(
           icon: Icons.location_off_outlined,
           title: 'Không tìm thấy địa điểm',
-          message: 'Địa điểm này có thể đã bị tác giả xóa hoặc liên kết không còn hợp lệ.',
+          message:
+              'Địa điểm này có thể đã bị tác giả xóa hoặc liên kết không còn hợp lệ.',
           onBack: _navigateBack,
         ),
       );
@@ -577,6 +580,8 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
                   backgroundImage: authorAvatarUrl.isNotEmpty
                       ? CachedNetworkImageProvider(authorAvatarUrl)
                       : null,
+                  onBackgroundImageError:
+                      authorAvatarUrl.isNotEmpty ? (_, _) {} : null,
                   child: authorAvatarUrl.isEmpty
                       ? Text(
                           spot.authorName.isNotEmpty
@@ -817,103 +822,110 @@ class _SpotDetailScreenState extends ConsumerState<SpotDetailScreen> {
           Expanded(
             child: RefreshIndicator(
               onRefresh: _refreshSpot,
-              child: ListView(
+              child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          spot.title,
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: colors.onSurface,
-                            height: 1.3,
-                            letterSpacing: -0.2,
-                          ),
-                        ),
-                        if (spot.description.trim().isNotEmpty) ...[
-                          const SizedBox(height: 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Text(
-                            spot.description,
+                            spot.title,
                             style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w400,
-                              color: colors.onSurface.withValues(alpha: 0.88),
-                              height: 1.48,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: colors.onSurface,
+                              height: 1.3,
+                              letterSpacing: -0.2,
                             ),
                           ),
-                        ],
-                        if (spot.addressText.trim().isNotEmpty) ...[
-                          const SizedBox(height: 10),
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(top: 1.5),
-                                child: Icon(
-                                  Icons.location_on_outlined,
-                                  size: 15,
-                                  color: colors.onSurfaceVariant,
-                                ),
+                          if (spot.description.trim().isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              spot.description,
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w400,
+                                color:
+                                    colors.onSurface.withValues(alpha: 0.88),
+                                height: 1.48,
                               ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  spot.addressText,
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
+                            ),
+                          ],
+                          if (spot.addressText.trim().isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 1.5),
+                                  child: Icon(
+                                    Icons.location_on_outlined,
+                                    size: 15,
                                     color: colors.onSurfaceVariant,
-                                    height: 1.35,
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    spot.addressText,
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: colors.onSurfaceVariant,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                  SpotImageCarousel(images: spot.imageUrls),
-                  SpotActionBar(
-                    isLiked: displayLiked,
-                    likesCount: displayLikesCount,
-                    isSaved: displaySaved,
-                    ratingAvg: spot.ratingAvg,
-                    ratingCount: spot.ratingCount,
-                    isLikeDisabled: isLikeProcessing,
-                    isSaveDisabled: _isTogglingSave,
-                    onLikeTap: () => _toggleLike(
-                      spot: spot,
-                      currentLiked: displayLiked,
-                      currentLikesCount: displayLikesCount,
+                    SpotImageCarousel(images: spot.imageUrls),
+                    SpotActionBar(
+                      isLiked: displayLiked,
+                      likesCount: displayLikesCount,
+                      isSaved: displaySaved,
+                      ratingAvg: spot.ratingAvg,
+                      ratingCount: spot.ratingCount,
+                      isLikeDisabled: isLikeProcessing,
+                      isSaveDisabled: _isTogglingSave,
+                      onLikeTap: () => _toggleLike(
+                        spot: spot,
+                        currentLiked: displayLiked,
+                        currentLikesCount: displayLikesCount,
+                      ),
+                      onCommentTap: () => _commentFocusNode.requestFocus(),
+                      onSaveTap: () => _toggleSave(
+                        spot: spot,
+                        currentSaved: displaySaved,
+                      ),
                     ),
-                    onCommentTap: () => _commentFocusNode.requestFocus(),
-                    onSaveTap: () => _toggleSave(
-                      spot: spot,
-                      currentSaved: displaySaved,
+                    SpotCoordinatesCard(
+                      tags: quickTags,
+                      latitude: spot.latitude,
+                      longitude: spot.longitude,
+                      onCopyCoordinates: () => _copyCoordinates(spot),
+                      onCopyMapsLink: () => _copyMapsLink(spot),
                     ),
-                  ),
-                  SpotCoordinatesCard(
-                    tags: quickTags,
-                    latitude: spot.latitude,
-                    longitude: spot.longitude,
-                    onCopyCoordinates: () => _copyCoordinates(spot),
-                    onCopyMapsLink: () => _copyMapsLink(spot),
-                  ),
-                  Divider(
-                    height: 1,
-                    color: colors.outlineVariant.withValues(alpha: 0.45),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
-                    child: ReviewSection(spot: spot),
-                  ),
-                ],
+                    Divider(
+                      height: 1,
+                      color: colors.outlineVariant.withValues(alpha: 0.45),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 20),
+                      child: ReviewSection(
+                        spot: spot,
+                        initialReviewId: widget.initialReviewId,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

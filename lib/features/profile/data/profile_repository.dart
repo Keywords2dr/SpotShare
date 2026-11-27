@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../notifications/data/notifications_repository.dart';
 import '../domain/user_profile_model.dart';
 
 typedef JsonMap = Map<String, dynamic>;
@@ -12,14 +13,21 @@ class _BatchUpdate {
 }
 
 class ProfileRepository {
-  ProfileRepository({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+  ProfileRepository({
+    FirebaseFirestore? firestore,
+    this.notificationsGateway,
+  }) : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
+  final NotificationsGateway? notificationsGateway;
 
   late final _usersRef = _firestore.collection('users');
   late final _usernamesRef = _firestore.collection('usernames');
   late final _spotsRef = _firestore.collection('spots');
+
+  NotificationsGateway get _notifications =>
+      notificationsGateway ??
+      FirestoreNotificationsRepository(firestore: _firestore);
 
   Stream<JsonMap> watchUserData(String userId) {
     return _usersRef
@@ -251,7 +259,7 @@ class ProfileRepository {
         currentUserRef.collection('following').doc(targetUserId);
     final followerRef = targetUserRef.collection('followers').doc(currentUserId);
 
-    return _firestore.runTransaction((transaction) async {
+    final isNowFollowing = await _firestore.runTransaction((transaction) async {
       final followingSnap = await transaction.get(followingRef);
       final currentUserSnap = await transaction.get(currentUserRef);
       final targetUserSnap = await transaction.get(targetUserRef);
@@ -297,6 +305,24 @@ class ProfileRepository {
         return true;
       }
     });
+
+    try {
+      if (isNowFollowing) {
+        await _notifications.sendNotification(
+          recipientId: targetUserId,
+          actorId: currentUserId,
+          type: NotificationType.follow,
+        );
+      } else {
+        await _notifications.removeInteractionNotification(
+          recipientId: targetUserId,
+          actorId: currentUserId,
+          type: NotificationType.follow,
+        );
+      }
+    } catch (_) {}
+
+    return isNowFollowing;
   }
 
   Future<void> updateUserBio({

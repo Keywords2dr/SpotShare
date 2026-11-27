@@ -8,6 +8,7 @@ import '../../features/auth/presentation/forgot_password_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/register_screen.dart';
 import '../../features/explore/presentation/explore_feed_screen.dart';
+import '../../features/notifications/presentation/notifications_screen.dart';
 import '../../features/profile/presentation/edit_profile_screen.dart';
 import '../../features/profile/presentation/profile_screen.dart';
 import '../../features/profile/presentation/public_profile_screen.dart';
@@ -107,11 +108,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/spots/:id',
         builder: (context, state) {
           final spotId = state.pathParameters['id'] ?? '';
+          final rawReviewId = state.uri.queryParameters['reviewId']?.trim();
+          final initialReviewId =
+              (rawReviewId != null && rawReviewId.isNotEmpty)
+                  ? rawReviewId
+                  : null;
           final initialSpot =
               state.extra is SpotModel ? state.extra as SpotModel : null;
           return SpotDetailScreen(
             spotId: spotId,
             initialSpot: initialSpot,
+            initialReviewId: initialReviewId,
           );
         },
       ),
@@ -140,12 +147,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             routes: [
               GoRoute(
                 path: '/notifications',
-                builder: (context, state) => const TabPlaceholderScreen(
-                  title: 'Hộp thư',
-                  subtitle:
-                      'Thông báo tương tác, bình luận và cột mốc lượt thích sẽ được cập nhật ở giai đoạn Thông báo đẩy.',
-                  icon: Icons.mail_outline_rounded,
-                ),
+                builder: (context, state) => const NotificationsScreen(),
               ),
             ],
           ),

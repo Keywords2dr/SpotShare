@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../notifications/data/notifications_repository.dart';
+
 typedef ReviewDataMap = Map<String, dynamic>;
 typedef ReviewItemList = List<SpotReviewItem>;
 typedef ReviewTreeNodeList = List<SpotReviewTreeNode>;
@@ -453,8 +455,7 @@ class SpotReviewLogic {
     }
 
     final hiddenCount = totalReplies - usedReplySlots;
-    final hasToggleRowAfterReplies =
-        totalReplies > collapsedReplyRowLimit;
+    final hasToggleRowAfterReplies = totalReplies > collapsedReplyRowLimit;
 
     final rows = <SpotReviewDisplayRow>[
       SpotReviewDisplayRow(
@@ -656,13 +657,17 @@ class FirestoreSpotReviewRepository implements SpotReviewGateway {
   FirestoreSpotReviewRepository({
     this.firestore,
     this.firebaseAuth,
+    this.notificationsGateway,
   });
 
   final FirebaseFirestore? firestore;
   final FirebaseAuth? firebaseAuth;
+  final NotificationsGateway? notificationsGateway;
 
   FirebaseFirestore get _db => firestore ?? FirebaseFirestore.instance;
   FirebaseAuth get _auth => firebaseAuth ?? FirebaseAuth.instance;
+  NotificationsGateway get _notifications =>
+      notificationsGateway ?? FirestoreNotificationsRepository(firestore: _db);
 
   String _resolveLiveUserId(String fallbackUserId) {
     try {
@@ -740,7 +745,7 @@ class FirestoreSpotReviewRepository implements SpotReviewGateway {
       final reviewsCol =
           _db.collection('spots').doc(cleanSpotId).collection('reviews');
 
-      await reviewsCol.add({
+      final addedDoc = await reviewsCol.add({
         'userId': cleanUserId,
         'userName': profile.displayName,
         'userAvatar': profile.avatarUrl,
@@ -760,6 +765,16 @@ class FirestoreSpotReviewRepository implements SpotReviewGateway {
       if (!isReply) {
         await _syncSpotRating(spotId: cleanSpotId, countDelta: 1);
       }
+
+      await _sendReviewNotifications(
+        spotId: cleanSpotId,
+        reviewId: addedDoc.id,
+        actorId: cleanUserId,
+        actorName: profile.displayName,
+        actorAvatar: profile.avatarUrl,
+        comment: cleanComment,
+        replyTo: replyTo,
+      );
     } on SpotReviewException {
       rethrow;
     } on FirebaseException catch (e) {
@@ -930,6 +945,84 @@ class FirestoreSpotReviewRepository implements SpotReviewGateway {
         'Không thể xóa bình luận lúc này. Vui lòng thử lại.',
         code: 'unknown',
       );
+    }
+  }
+
+  Future<void> _sendReviewNotifications({
+    required String spotId,
+    required String reviewId,
+    required String actorId,
+    required String actorName,
+    required String actorAvatar,
+    required String comment,
+    SpotReviewItem? replyTo,
+  }) async {
+    try {
+      String spotAuthorId = '';
+      String spotTitle = '';
+      String spotThumb = '';
+
+      final spotSnap = await _db.collection('spots').doc(spotId).get();
+      final spotData = spotSnap.data();
+      if (spotData != null) {
+        spotAuthorId = ((spotData['authorId'] as String?) ?? '').trim();
+        spotTitle = ((spotData['title'] as String?) ?? '').trim();
+        final rawImages = spotData['imageUrls'];
+        if (rawImages is List) {
+          for (final entry in rawImages) {
+            if (entry is String && entry.trim().isNotEmpty) {
+              spotThumb = entry.trim();
+              break;
+            }
+          }
+        }
+      }
+
+      final replyTargetUid = replyTo?.userId.trim() ?? '';
+      if (replyTargetUid.isNotEmpty &&
+          NotificationsLogic.shouldNotify(
+            recipientId: replyTargetUid,
+            actorId: actorId,
+          )) {
+        await _notifications.sendNotification(
+          recipientId: replyTargetUid,
+          actorId: actorId,
+          actorName: actorName,
+          actorAvatar: actorAvatar,
+          type: NotificationType.reply,
+          spotId: spotId,
+          spotTitle: spotTitle,
+          spotThumbnail: spotThumb,
+          reviewId: reviewId,
+          commentPreview: comment,
+        );
+      }
+
+      if (spotAuthorId.isNotEmpty &&
+          spotAuthorId != replyTargetUid &&
+          NotificationsLogic.shouldNotify(
+            recipientId: spotAuthorId,
+            actorId: actorId,
+          )) {
+        await _notifications.sendNotification(
+          recipientId: spotAuthorId,
+          actorId: actorId,
+          actorName: actorName,
+          actorAvatar: actorAvatar,
+          type: NotificationType.comment,
+          spotId: spotId,
+          spotTitle: spotTitle,
+          spotThumbnail: spotThumb,
+          reviewId: reviewId,
+          commentPreview: comment,
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          '[SpotReviewRepository] non-fatal review notification skipped: $e',
+        );
+      }
     }
   }
 

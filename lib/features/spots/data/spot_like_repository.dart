@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../notifications/data/notifications_repository.dart';
+
 typedef FirestoreDoc = Map<String, dynamic>;
 
 class SpotLikeException implements Exception {
@@ -79,11 +81,17 @@ abstract class SpotLikeGateway {
 }
 
 class FirestoreSpotLikeRepository implements SpotLikeGateway {
-  FirestoreSpotLikeRepository({this.firestore});
+  FirestoreSpotLikeRepository({
+    this.firestore,
+    this.notificationsGateway,
+  });
 
   final FirebaseFirestore? firestore;
+  final NotificationsGateway? notificationsGateway;
 
   FirebaseFirestore get _db => firestore ?? FirebaseFirestore.instance;
+  NotificationsGateway get _notifications =>
+      notificationsGateway ?? FirestoreNotificationsRepository(firestore: _db);
 
   @override
   Stream<bool> watchIsLiked({
@@ -135,6 +143,8 @@ class FirestoreSpotLikeRepository implements SpotLikeGateway {
         .doc(cleanSpotId);
 
     String resolvedAuthorId = (authorId ?? '').trim();
+    String resolvedSpotTitle = '';
+    String resolvedSpotThumb = '';
 
     try {
       final result = await _db.runTransaction<SpotLikeResult>(
@@ -153,6 +163,16 @@ class FirestoreSpotLikeRepository implements SpotLikeGateway {
           final docAuthorId = (spotData['authorId'] as String?)?.trim() ?? '';
           if (docAuthorId.isNotEmpty) {
             resolvedAuthorId = docAuthorId;
+          }
+          resolvedSpotTitle = ((spotData['title'] as String?) ?? '').trim();
+          final rawImages = spotData['imageUrls'];
+          if (rawImages is List) {
+            for (final entry in rawImages) {
+              if (entry is String && entry.trim().isNotEmpty) {
+                resolvedSpotThumb = entry.trim();
+                break;
+              }
+            }
           }
 
           final willLike = !likeSnap.exists;
@@ -200,6 +220,14 @@ class FirestoreSpotLikeRepository implements SpotLikeGateway {
           authorId: resolvedAuthorId,
           willLike: result.isLiked,
         );
+        await _syncLikeNotification(
+          authorId: resolvedAuthorId,
+          actorId: cleanUserId,
+          spotId: cleanSpotId,
+          spotTitle: resolvedSpotTitle,
+          spotThumbnail: resolvedSpotThumb,
+          willLike: result.isLiked,
+        );
       }
 
       return result;
@@ -220,6 +248,47 @@ class FirestoreSpotLikeRepository implements SpotLikeGateway {
         'Không thể cập nhật lượt thích lúc này. Vui lòng thử lại.',
         code: 'unknown',
       );
+    }
+  }
+
+  Future<void> _syncLikeNotification({
+    required String authorId,
+    required String actorId,
+    required String spotId,
+    required String spotTitle,
+    required String spotThumbnail,
+    required bool willLike,
+  }) async {
+    if (!NotificationsLogic.shouldNotify(
+      recipientId: authorId,
+      actorId: actorId,
+    )) {
+      return;
+    }
+    try {
+      if (willLike) {
+        await _notifications.sendNotification(
+          recipientId: authorId,
+          actorId: actorId,
+          type: NotificationType.like,
+          spotId: spotId,
+          spotTitle: spotTitle,
+          spotThumbnail: spotThumbnail,
+        );
+      } else {
+        await _notifications.removeInteractionNotification(
+          recipientId: authorId,
+          actorId: actorId,
+          type: NotificationType.like,
+          spotId: spotId,
+        );
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint(
+          '[SpotLikeRepository] non-fatal like notification skipped: $e',
+        );
+      }
     }
   }
 

@@ -10,6 +10,37 @@ import '../../../spots/domain/spot_model.dart';
 import '../../data/spot_review_repository.dart';
 import '../spot_review_controller.dart';
 
+class ReviewDeepLinkLogic {
+  static String? findThreadRootId({
+    required ReviewTreeNodeList trees,
+    required String reviewId,
+  }) {
+    final cleanId = reviewId.trim();
+    if (cleanId.isEmpty) return null;
+
+    bool containsInNode(SpotReviewTreeNode node) {
+      if (node.item.id == cleanId) return true;
+      for (final child in node.children) {
+        if (containsInNode(child)) return true;
+      }
+      return false;
+    }
+
+    for (final root in trees) {
+      if (containsInNode(root)) {
+        return root.item.id;
+      }
+    }
+    return null;
+  }
+
+  static double highlightOpacity(double progress) {
+    final t = progress.clamp(0.0, 1.0);
+    if (t <= 0.65) return 1.0;
+    return ((1.0 - t) / 0.35).clamp(0.0, 1.0);
+  }
+}
+
 class _ThreadTreeMetrics {
   static double avatarRadius(int depth) {
     if (depth <= 0) return 15.0;
@@ -137,26 +168,133 @@ class ReviewSection extends ConsumerStatefulWidget {
     this.spot,
     this.spotId,
     this.spotAuthorId,
+    this.initialReviewId,
     this.onUserTap,
   }) : assert(spot != null || spotId != null);
 
   final SpotModel? spot;
   final String? spotId;
   final String? spotAuthorId;
+  final String? initialReviewId;
   final void Function(String userId)? onUserTap;
 
   @override
   ConsumerState<ReviewSection> createState() => _ReviewSectionState();
 }
 
-class _ReviewSectionState extends ConsumerState<ReviewSection> {
+class _ReviewSectionState extends ConsumerState<ReviewSection>
+    with SingleTickerProviderStateMixin {
   static const int _collapsedReplyRowLimit = 3;
 
   final Set<String> _expandedThreadIds = <String>{};
+  final GlobalKey _sectionHeaderKey = GlobalKey();
+  final GlobalKey _targetReviewKey = GlobalKey();
+
+  late final AnimationController _highlightController;
+  String? _highlightedReviewId;
+  bool _hasFocusedTarget = false;
+  bool _isFocusScheduled = false;
+  bool _hasNotifiedMissing = false;
 
   String get _spotId => (widget.spot?.id ?? widget.spotId ?? '').trim();
   String get _spotAuthorId =>
       (widget.spot?.authorId ?? widget.spotAuthorId ?? '').trim();
+  String get _targetReviewId => (widget.initialReviewId ?? '').trim();
+
+  @override
+  void initState() {
+    super.initState();
+    _highlightController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2600),
+    )..addStatusListener((status) {
+        if (status == AnimationStatus.completed && mounted) {
+          setState(() {
+            _highlightedReviewId = null;
+          });
+        }
+      });
+  }
+
+  @override
+  void didUpdateWidget(covariant ReviewSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldSpotId = (oldWidget.spot?.id ?? oldWidget.spotId ?? '').trim();
+    final oldTargetId = (oldWidget.initialReviewId ?? '').trim();
+    if (oldSpotId != _spotId || oldTargetId != _targetReviewId) {
+      _hasFocusedTarget = false;
+      _isFocusScheduled = false;
+      _hasNotifiedMissing = false;
+      _highlightedReviewId = null;
+      _highlightController.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _highlightController.dispose();
+    super.dispose();
+  }
+
+  void _scheduleTargetFocus(ReviewTreeNodeList trees) {
+    final targetId = _targetReviewId;
+    if (targetId.isEmpty || _hasFocusedTarget || _isFocusScheduled) {
+      return;
+    }
+
+    final rootId = ReviewDeepLinkLogic.findThreadRootId(
+      trees: trees,
+      reviewId: targetId,
+    );
+
+    if (rootId == null) {
+      if (_hasNotifiedMissing) return;
+      _hasNotifiedMissing = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _hasFocusedTarget) return;
+        final headerContext = _sectionHeaderKey.currentContext;
+        if (headerContext != null) {
+          Scrollable.ensureVisible(
+            headerContext,
+            alignment: 0.08,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic,
+          );
+        }
+        _showSnackBar('Bình luận này không còn tồn tại.');
+      });
+      return;
+    }
+
+    _isFocusScheduled = true;
+    _hasFocusedTarget = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_hasNotifiedMissing) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      }
+      setState(() {
+        if (rootId != targetId) {
+          _expandedThreadIds.add(rootId);
+        }
+        _highlightedReviewId = targetId;
+      });
+      _highlightController.forward(from: 0.0);
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final targetContext = _targetReviewKey.currentContext;
+        if (targetContext != null) {
+          Scrollable.ensureVisible(
+            targetContext,
+            alignment: 0.25,
+            duration: const Duration(milliseconds: 420),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      });
+    });
+  }
 
   void _showSnackBar(String message) {
     if (!mounted) return;
@@ -241,6 +379,61 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
     }
   }
 
+  Widget _buildRowWidget({
+    required SpotReviewDisplayRow row,
+    required Color connectorColor,
+    required String currentUserId,
+    required String? activeReplyTargetId,
+    required bool attachTargetKey,
+  }) {
+    final item = row.item;
+    final isFocusedTarget = _highlightedReviewId == item.id;
+
+    Widget buildTile(double focusStrength) {
+      final tile = _ThreadedCommentRow(
+        row: row,
+        connectorColor: connectorColor,
+        isHighlighted: activeReplyTargetId == item.id,
+        focusHighlightStrength: focusStrength,
+        isOwnComment:
+            currentUserId.isNotEmpty && currentUserId == item.userId,
+        isSpotAuthor:
+            _spotAuthorId.isNotEmpty && _spotAuthorId == item.userId,
+        onAuthorTap: () => _openUserProfile(item.userId),
+        onReplyTap: () => _handleReply(item),
+        onEditTap: () => _handleEdit(item),
+        onDeleteTap: () => _handleDelete(item),
+      );
+      if (focusStrength > 0) {
+        return KeyedSubtree(
+          key: Key('review_focused_highlight_${item.id}'),
+          child: tile,
+        );
+      }
+      return tile;
+    }
+
+    Widget content;
+    if (isFocusedTarget) {
+      content = AnimatedBuilder(
+        animation: _highlightController,
+        builder: (_, _) => buildTile(
+          ReviewDeepLinkLogic.highlightOpacity(_highlightController.value),
+        ),
+      );
+    } else {
+      content = buildTile(0.0);
+    }
+
+    if (attachTargetKey) {
+      return KeyedSubtree(
+        key: _targetReviewKey,
+        child: content,
+      );
+    }
+    return content;
+  }
+
   @override
   Widget build(BuildContext context) {
     final reviewsAsync = ref.watch(spotReviewsStreamProvider(_spotId));
@@ -300,11 +493,14 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
       data: (items) {
         final trees = SpotReviewLogic.buildTreeNodes(items);
         final activeCount = SpotReviewLogic.countActiveComments(trees);
+        _scheduleTargetFocus(trees);
+        var attachedTargetKey = false;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              key: _sectionHeaderKey,
               children: [
                 Text(
                   'Bình luận',
@@ -402,18 +598,22 @@ class _ReviewSectionState extends ConsumerState<ReviewSection> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       for (final row in threadView.visibleRows)
-                        _ThreadedCommentRow(
-                          row: row,
-                          connectorColor: connectorColor,
-                          isHighlighted: activeReplyTargetId == row.item.id,
-                          isOwnComment: currentUserId.isNotEmpty &&
-                              currentUserId == row.item.userId,
-                          isSpotAuthor: _spotAuthorId.isNotEmpty &&
-                              _spotAuthorId == row.item.userId,
-                          onAuthorTap: () => _openUserProfile(row.item.userId),
-                          onReplyTap: () => _handleReply(row.item),
-                          onEditTap: () => _handleEdit(row.item),
-                          onDeleteTap: () => _handleDelete(row.item),
+                        Builder(
+                          builder: (_) {
+                            final shouldAttach = !attachedTargetKey &&
+                                _targetReviewId.isNotEmpty &&
+                                row.item.id == _targetReviewId;
+                            if (shouldAttach) {
+                              attachedTargetKey = true;
+                            }
+                            return _buildRowWidget(
+                              row: row,
+                              connectorColor: connectorColor,
+                              currentUserId: currentUserId,
+                              activeReplyTargetId: activeReplyTargetId,
+                              attachTargetKey: shouldAttach,
+                            );
+                          },
                         ),
                       if (showToggleRow)
                         _ThreadToggleRow(
@@ -447,6 +647,7 @@ class _ThreadedCommentRow extends StatelessWidget {
     required this.row,
     required this.connectorColor,
     required this.isHighlighted,
+    this.focusHighlightStrength = 0.0,
     required this.isOwnComment,
     required this.isSpotAuthor,
     required this.onAuthorTap,
@@ -458,6 +659,7 @@ class _ThreadedCommentRow extends StatelessWidget {
   final SpotReviewDisplayRow row;
   final Color connectorColor;
   final bool isHighlighted;
+  final double focusHighlightStrength;
   final bool isOwnComment;
   final bool isSpotAuthor;
   final VoidCallback onAuthorTap;
@@ -478,14 +680,23 @@ class _ThreadedCommentRow extends StatelessWidget {
         ? CloudinaryUrlHelper.feedThumbnail(item.userAvatar)
         : '';
 
-    final bubbleColor = isHighlighted
-        ? colors.primaryContainer.withValues(alpha: 0.42)
-        : (depth == 0
-            ? colors.surfaceContainerLow
-            : colors.surfaceContainerHighest.withValues(alpha: 0.45));
-    final bubbleBorderColor = isHighlighted
-        ? colors.primary.withValues(alpha: 0.55)
-        : colors.outlineVariant.withValues(alpha: 0.32);
+    final double highlightFactor = isHighlighted
+        ? 1.0
+        : focusHighlightStrength.clamp(0.0, 1.0);
+    final baseBubbleColor = depth == 0
+        ? colors.surfaceContainerLow
+        : colors.surfaceContainerHighest.withValues(alpha: 0.45);
+    final highlightBubbleColor =
+        colors.primaryContainer.withValues(alpha: 0.5);
+    final bubbleColor =
+        Color.lerp(baseBubbleColor, highlightBubbleColor, highlightFactor) ??
+            baseBubbleColor;
+
+    final baseBorderColor = colors.outlineVariant.withValues(alpha: 0.32);
+    final highlightBorderColor = colors.primary.withValues(alpha: 0.72);
+    final bubbleBorderColor =
+        Color.lerp(baseBorderColor, highlightBorderColor, highlightFactor) ??
+            baseBorderColor;
 
     return Stack(
       children: [
@@ -517,6 +728,10 @@ class _ThreadedCommentRow extends StatelessWidget {
                   backgroundImage: (!item.isDeleted && avatarUrl.isNotEmpty)
                       ? CachedNetworkImageProvider(avatarUrl)
                       : null,
+                  onBackgroundImageError:
+                      (!item.isDeleted && avatarUrl.isNotEmpty)
+                          ? (_, _) {}
+                          : null,
                   child: (item.isDeleted || avatarUrl.isEmpty)
                       ? Icon(
                           item.isDeleted
@@ -534,7 +749,9 @@ class _ThreadedCommentRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     AnimatedContainer(
-                      duration: const Duration(milliseconds: 160),
+                      duration: focusHighlightStrength > 0
+                          ? Duration.zero
+                          : const Duration(milliseconds: 160),
                       padding: EdgeInsets.symmetric(
                         horizontal: depth == 2 ? 9 : 10,
                         vertical: depth == 2 ? 6 : 7,
@@ -544,7 +761,7 @@ class _ThreadedCommentRow extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: bubbleBorderColor,
-                          width: isHighlighted ? 1.0 : 0.6,
+                          width: highlightFactor > 0.05 ? 1.2 : 0.6,
                         ),
                       ),
                       child: Column(
@@ -1286,7 +1503,8 @@ class _EditReviewSheetState extends ConsumerState<EditReviewSheet> {
     } else {
       setState(() {
         _isSaving = false;
-        _errorMessage = result.errorMessage ?? 'Cập nhật bình luận thất bại.';
+        _errorMessage =
+            result.errorMessage ?? 'Cập nhật bình luận thất bại.';
       });
     }
   }

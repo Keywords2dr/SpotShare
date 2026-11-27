@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../features/notifications/presentation/notifications_controller.dart';
 import 'widgets/compact_bottom_nav_bar.dart';
 
-class MainShellScreen extends StatelessWidget {
+class MainShellScreen extends ConsumerWidget {
   const MainShellScreen({
     super.key,
     required this.navigationShell,
-    this.unreadNotificationsCount = 0,
+    this.unreadNotificationsCount,
   });
 
   final StatefulNavigationShell navigationShell;
-  final int unreadNotificationsCount;
+  final int? unreadNotificationsCount;
 
   void _onDestinationSelected(int index) {
     navigationShell.goBranch(
@@ -21,7 +23,10 @@ class MainShellScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final int badgeCount =
+        unreadNotificationsCount ?? ref.watch(unreadNotificationsCountProvider);
+
     final items = [
       const CompactNavItemData(
         keyName: 'nav_explore',
@@ -40,7 +45,7 @@ class MainShellScreen extends StatelessWidget {
         label: 'Hộp thư',
         icon: Icons.mail_outline_rounded,
         selectedIcon: Icons.mail_rounded,
-        badgeCount: unreadNotificationsCount,
+        badgeCount: badgeCount,
       ),
       const CompactNavItemData(
         keyName: 'nav_profile',
