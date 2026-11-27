@@ -162,7 +162,7 @@ void main() {
     });
 
     testWidgets(
-        'ProfileHeaderSection disables avatar tap during upload and renders cleanly in Dark Mode 5.5 inch viewport',
+        'ProfileHeaderSection hides bio edit icon, disables avatar tap during upload, and renders cleanly in Dark Mode 5.5 inch viewport',
         (tester) async {
       var avatarTapped = false;
       tester.view.physicalSize = const Size(360, 640);
@@ -206,6 +206,8 @@ void main() {
       await tester.pump();
       expect(tester.takeException(), isNull);
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byKey(const Key('profile_bio_text')), findsOneWidget);
+      expect(find.byIcon(Icons.edit_outlined), findsNothing);
 
       await tester.tap(find.byKey(const Key('profile_avatar_button')));
       await tester.pump();
@@ -223,7 +225,8 @@ void main() {
               body: Center(
                 child: ElevatedButton(
                   onPressed: () async {
-                    result = await showModalBottomSheet<ProfileAvatarSourceOption>(
+                    result =
+                        await showModalBottomSheet<ProfileAvatarSourceOption>(
                       context: context,
                       builder: (_) => const ProfileAvatarPickerSheet(
                         showCameraOption: true,
@@ -250,7 +253,8 @@ void main() {
       expect(result, ProfileAvatarSourceOption.camera);
     });
 
-    testWidgets('ProfileSignOutDialog returns confirmation boolean and ProfileGuestView triggers login',
+    testWidgets(
+        'ProfileSignOutDialog returns confirmation boolean and ProfileGuestView triggers login',
         (tester) async {
       bool? confirmed;
       var loginTapped = false;

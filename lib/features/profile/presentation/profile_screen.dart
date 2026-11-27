@@ -243,12 +243,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
           actions: [
             IconButton(
-              onPressed:
-                  _isSigningOut ? null : () => _refreshProfile(authUser.uid),
-              tooltip: 'Làm mới hồ sơ',
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-            IconButton(
               onPressed: _isSigningOut ? null : _confirmAndSignOut,
               tooltip: 'Đăng xuất',
               icon: const Icon(Icons.logout_rounded),

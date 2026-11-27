@@ -60,7 +60,7 @@ void main() {
     ];
 
     testWidgets(
-        'switches images inline, opens fullscreen at current page, navigates all images, and exits via close button without overflow',
+        'switches images inline, opens fullscreen at current page, navigates all images, and exits via back button without overflow',
         (tester) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -76,6 +76,7 @@ void main() {
 
       expect(tester.takeException(), isNull);
       expect(find.text('1 / 3'), findsOneWidget);
+      expect(find.byKey(const Key('spot_carousel_expand_button')), findsNothing);
 
       await tester.tap(find.byKey(const Key('spot_carousel_next_button')));
       await tester.pumpAndSettle();
@@ -85,6 +86,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('fullscreen_gallery_page_view')), findsOneWidget);
+      expect(find.byKey(const Key('fullscreen_gallery_close_button')), findsNothing);
       expect(
         find.descendant(
           of: find.byKey(const Key('fullscreen_gallery_counter')),
@@ -127,7 +129,7 @@ void main() {
         findsOneWidget,
       );
 
-      await tester.tap(find.byKey(const Key('fullscreen_gallery_close_button')));
+      await tester.tap(find.byKey(const Key('fullscreen_gallery_back_button')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('fullscreen_gallery_page_view')), findsNothing);
@@ -201,7 +203,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.byKey(const Key('spot_carousel_expand_button')));
+      await tester.tap(find.byKey(const Key('spot_carousel_image_0')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('fullscreen_gallery_page_view')), findsOneWidget);
 
@@ -240,7 +242,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('fullscreen_gallery_page_view')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('spot_carousel_expand_button')));
+      await tester.tap(find.byKey(const Key('spot_carousel_image_1')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('fullscreen_gallery_page_view')), findsOneWidget);
 

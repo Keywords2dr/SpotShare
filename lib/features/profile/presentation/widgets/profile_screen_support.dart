@@ -373,6 +373,8 @@ class ProfileHeaderSection extends StatelessWidget {
                         backgroundImage: profile.avatarUrl.isNotEmpty
                             ? CachedNetworkImageProvider(profile.avatarUrl)
                             : null,
+                        onBackgroundImageError:
+                            profile.avatarUrl.isNotEmpty ? (_, _) {} : null,
                         child: isUploadingAvatar
                             ? Container(
                                 decoration: BoxDecoration(
@@ -456,30 +458,13 @@ class ProfileHeaderSection extends StatelessWidget {
               ),
             )
           else
-            InkWell(
-              key: const Key('profile_edit_bio_button'),
-              onTap: onEditProfile,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        profile.bio,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          height: 1.4,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Icon(
-                      Icons.edit_outlined,
-                      size: 16,
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ],
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                profile.bio,
+                key: const Key('profile_bio_text'),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  height: 1.4,
                 ),
               ),
             ),
